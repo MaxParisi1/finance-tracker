@@ -18,7 +18,15 @@ from telegram.ext import (
     filters,
 )
 
-from bot.agent import run_agent
+from bot.agent import run_agent, set_pdf_pendiente
+from bot.tools.media_processor import (
+    procesar_imagen_ticket,
+    procesar_audio,
+    ticket_a_mensaje,
+    audio_a_mensaje,
+)
+from bot.tools.bbva_parser import importar_pdf_bbva
+from bot.db.queries import obtener_gastos
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -34,6 +42,14 @@ ALLOWED_USER_ID = int(os.environ["ALLOWED_TELEGRAM_USER_ID"])
 _conversation_history: dict[int, list[dict]] = {}
 
 MAX_HISTORY_TURNS = 20  # Máximo de turnos a mantener en memoria
+
+
+async def safe_reply(message, text: str) -> None:
+    """Intenta enviar con Markdown; si Telegram rechaza, envía como texto plano."""
+    try:
+        await message.reply_text(text, parse_mode="Markdown")
+    except Exception:
+        await message.reply_text(text)
 
 
 def _is_authorized(update: Update) -> bool:
@@ -110,26 +126,153 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     history = _get_history(chat_id)
 
     try:
-        response = run_agent(user_text, history)
+        response = run_agent(user_text, history, chat_id=chat_id)
     except Exception as e:
         logger.exception("Error en el agente")
         response = "Uy, algo salió mal. Intentá de nuevo en un momento."
 
-    # Actualizar historial
     _add_to_history(chat_id, "user", user_text)
     _add_to_history(chat_id, "model", response)
 
-    await update.message.reply_text(response, parse_mode="Markdown")
+    await safe_reply(update.message, response)
 
 
-async def unknown_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler para tipos de mensaje no soportados aún (foto, audio, documento)."""
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa fotos de tickets con Gemini Vision."""
     if not _is_authorized(update):
         return
-    await update.message.reply_text(
-        "Ese tipo de mensaje todavía no está soportado, pero pronto va a estarlo. "
-        "Por ahora mandame texto."
+
+    chat_id = update.effective_chat.id
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    # Descargar la foto en máxima resolución
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    img_bytes = await file.download_as_bytearray()
+
+    try:
+        datos = procesar_imagen_ticket(bytes(img_bytes))
+        mensaje_interno = ticket_a_mensaje(datos)
+    except Exception as e:
+        logger.exception("Error procesando imagen")
+        await update.message.reply_text("No pude procesar la imagen. Intentá de nuevo o describí el gasto en texto.")
+        return
+
+    history = _get_history(chat_id)
+    try:
+        response = run_agent(mensaje_interno, history, chat_id=chat_id)
+    except Exception:
+        logger.exception("Error en el agente (foto)")
+        response = "Uy, algo salió mal procesando la foto."
+
+    _add_to_history(chat_id, "user", "[foto de ticket]")
+    _add_to_history(chat_id, "model", response)
+
+    await safe_reply(update.message, response)
+
+
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa notas de voz con Gemini Audio."""
+    if not _is_authorized(update):
+        return
+
+    chat_id = update.effective_chat.id
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    # Telegram envía voice notes como OGG/OPUS
+    voice = update.message.voice or update.message.audio
+    file = await context.bot.get_file(voice.file_id)
+    audio_bytes = await file.download_as_bytearray()
+
+    mime_type = "audio/ogg" if update.message.voice else "audio/mpeg"
+
+    try:
+        datos = procesar_audio(bytes(audio_bytes), mime_type=mime_type)
+        mensaje_interno = audio_a_mensaje(datos)
+    except Exception:
+        logger.exception("Error procesando audio")
+        await update.message.reply_text("No pude procesar el audio. Intentá de nuevo o escribí el gasto.")
+        return
+
+    history = _get_history(chat_id)
+    try:
+        response = run_agent(mensaje_interno, history, chat_id=chat_id)
+    except Exception:
+        logger.exception("Error en el agente (audio)")
+        response = "Uy, algo salió mal procesando el audio."
+
+    _add_to_history(chat_id, "user", f"[audio: {datos.get('transcripcion', '...')}]")
+    _add_to_history(chat_id, "model", response)
+
+    await safe_reply(update.message, response)
+
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa PDFs del resumen BBVA."""
+    if not _is_authorized(update):
+        return
+
+    doc = update.message.document
+    chat_id = update.effective_chat.id
+
+    # Solo aceptar PDFs
+    if doc.mime_type != "application/pdf":
+        await update.message.reply_text("Solo proceso archivos PDF (resúmenes BBVA). Para otros archivos, describí el gasto en texto.")
+        return
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="upload_document")
+    await update.message.reply_text("Recibí el PDF, lo estoy procesando... un momento.")
+
+    file = await context.bot.get_file(doc.file_id)
+    pdf_bytes = await file.download_as_bytearray()
+
+    try:
+        # Traer gastos recientes para detección de duplicados (últimos 90 días)
+        from datetime import date, timedelta
+        fecha_desde = (date.today() - timedelta(days=90)).isoformat()
+        gastos_existentes = obtener_gastos({"fecha_desde": fecha_desde})
+
+        resultado = importar_pdf_bbva(bytes(pdf_bytes), gastos_existentes)
+        set_pdf_pendiente(chat_id, resultado, bytes(pdf_bytes))
+
+    except Exception:
+        logger.exception("Error procesando PDF BBVA")
+        await update.message.reply_text("No pude procesar el PDF. ¿Es un resumen BBVA? Intentá de nuevo.")
+        return
+
+    # Construir mensaje interno para el agente con el resumen
+    nuevos = resultado["total_nuevos"]
+    duplicados = resultado["total_duplicados"]
+    fecha_desde_pdf = resultado.get("fecha_desde") or "?"
+    fecha_hasta_pdf = resultado.get("fecha_hasta") or "?"
+    metodo = resultado.get("metodo_usado", "texto")
+
+    muestra = resultado["movimientos_nuevos"][:5]
+    muestra_txt = "\n".join(
+        f"  • {m.get('fecha', '?')} | {m.get('descripcion', '?')} | ${m.get('monto', 0):,.2f} {m.get('moneda', 'ARS')}"
+        for m in muestra
     )
+
+    mensaje_interno = (
+        f"El usuario mandó un PDF de resumen BBVA. Ya fue procesado (método: {metodo}).\n"
+        f"Encontré {nuevos + duplicados} movimientos entre {fecha_desde_pdf} y {fecha_hasta_pdf}.\n"
+        f"Nuevos para importar: {nuevos}. Duplicados detectados (se omitirán): {duplicados}.\n\n"
+        f"Primeros movimientos nuevos:\n{muestra_txt}\n\n"
+        f"Mostrá este resumen al usuario y pedí confirmación explícita para importar. "
+        f"Si confirma, llamá a confirmar_importacion_pdf_bbva."
+    )
+
+    history = _get_history(chat_id)
+    try:
+        response = run_agent(mensaje_interno, history, chat_id=chat_id)
+    except Exception:
+        logger.exception("Error en el agente (PDF)")
+        response = "Uy, algo salió mal mostrando el resumen del PDF."
+
+    _add_to_history(chat_id, "user", "[PDF resumen BBVA]")
+    _add_to_history(chat_id, "model", response)
+
+    await safe_reply(update.message, response)
 
 
 # ──────────────────────────────────────────────
@@ -150,10 +293,9 @@ async def _run() -> None:
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("reset", reset_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(
-        filters.PHOTO | filters.AUDIO | filters.VOICE | filters.Document.ALL,
-        unknown_handler,
-    ))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
 
     if webhook_url:
         logger.info(f"Iniciando en modo webhook: {webhook_url}")

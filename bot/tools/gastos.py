@@ -85,6 +85,41 @@ def guardar_gasto(
     return queries.insertar_gasto(gasto)
 
 
+def guardar_multiples_gastos(gastos: list[dict]) -> dict:
+    """
+    Guarda múltiples gastos en un solo llamado, después de que el usuario confirmó el listado.
+
+    Args:
+        gastos: Lista de dicts, cada uno con los mismos campos que guardar_gasto().
+                Campos requeridos: descripcion, monto, moneda, categoria, medio_pago.
+                Campos opcionales: fecha, cuotas, cuota_actual, comercio, notas, fuente, tipo_cambio_tipo.
+
+    Returns:
+        {
+            "guardados": int,
+            "errores": [{"indice": int, "descripcion": str, "error": str}],
+            "ids": [uuid, ...]
+        }
+    """
+    guardados = 0
+    errores = []
+    ids = []
+
+    for i, g in enumerate(gastos):
+        try:
+            registro = guardar_gasto(**g)
+            guardados += 1
+            ids.append(registro.get("id"))
+        except Exception as e:
+            errores.append({
+                "indice": i + 1,
+                "descripcion": g.get("descripcion", "?"),
+                "error": str(e),
+            })
+
+    return {"guardados": guardados, "errores": errores, "ids": ids}
+
+
 def guardar_gasto_recurrente(
     descripcion: str,
     monto: float,
@@ -262,4 +297,143 @@ def gastos_recurrentes_activos() -> dict:
     return {
         "cantidad": len(recurrentes),
         "recurrentes": recurrentes,
+    }
+
+
+def tendencia_gastos(meses: int = 6) -> dict:
+    """
+    Devuelve la evolución del gasto total en los últimos N meses,
+    con variación porcentual mes a mes.
+
+    Returns:
+        {
+            "meses_analizados": 6,
+            "tendencia": [
+                {"mes": 10, "anio": 2024, "total_ars": 120000.0, "cantidad_gastos": 35, "variacion_pct": None},
+                {"mes": 11, "anio": 2024, "total_ars": 145000.0, "cantidad_gastos": 42, "variacion_pct": 20.8},
+                ...
+            ]
+        }
+    """
+    hoy = date.today()
+
+    # Construir lista de (mes, anio) para los últimos N meses, del más viejo al más nuevo
+    periodos = []
+    for i in range(meses - 1, -1, -1):
+        mes = hoy.month - i
+        anio = hoy.year
+        while mes <= 0:
+            mes += 12
+            anio -= 1
+        periodos.append((mes, anio))
+
+    tendencia = []
+    for mes, anio in periodos:
+        r = resumen_mensual(mes, anio)
+        tendencia.append({
+            "mes": mes,
+            "anio": anio,
+            "total_ars": r["total_ars"],
+            "cantidad_gastos": r["cantidad_gastos"],
+            "variacion_pct": None,
+        })
+
+    # Calcular variación mes a mes
+    for i in range(1, len(tendencia)):
+        prev = tendencia[i - 1]["total_ars"]
+        curr = tendencia[i]["total_ars"]
+        if prev > 0:
+            tendencia[i]["variacion_pct"] = round((curr - prev) / prev * 100, 1)
+
+    return {
+        "meses_analizados": meses,
+        "tendencia": tendencia,
+    }
+
+
+def top_comercios(mes: int | None = None, anio: int | None = None, limite: int = 10) -> dict:
+    """
+    Devuelve el ranking de los comercios/descripciones con mayor gasto en un período.
+
+    Args:
+        mes:    Mes a analizar (default: mes actual).
+        anio:   Año a analizar (default: año actual).
+        limite: Cantidad máxima de resultados (default: 10).
+
+    Returns:
+        {
+            "mes": 3, "anio": 2025,
+            "top_comercios": [
+                {"nombre": "Carrefour", "total_ars": 45000.0, "cantidad": 5},
+                ...
+            ]
+        }
+    """
+    hoy = date.today()
+    filtros = {
+        "mes": mes or hoy.month,
+        "anio": anio or hoy.year,
+    }
+
+    gastos = queries.obtener_gastos(filtros)
+
+    por_comercio: dict[str, dict] = {}
+    for g in gastos:
+        nombre = g.get("comercio") or g.get("descripcion") or "Sin descripción"
+        if nombre not in por_comercio:
+            por_comercio[nombre] = {"nombre": nombre, "total_ars": 0.0, "cantidad": 0}
+        por_comercio[nombre]["total_ars"] += g.get("monto_ars") or 0
+        por_comercio[nombre]["cantidad"] += 1
+
+    top = sorted(por_comercio.values(), key=lambda x: x["total_ars"], reverse=True)[:limite]
+    for item in top:
+        item["total_ars"] = round(item["total_ars"], 2)
+
+    return {
+        "mes": filtros["mes"],
+        "anio": filtros["anio"],
+        "top_comercios": top,
+    }
+
+
+def proyeccion_mensual() -> dict:
+    """
+    Proyecta el gasto total del mes actual basándose en el ritmo de los días transcurridos.
+
+    Returns:
+        {
+            "mes": 3, "anio": 2025,
+            "dias_transcurridos": 13,
+            "dias_totales": 31,
+            "gastado_hasta_hoy": 85000.0,
+            "promedio_diario_ars": 6538.46,
+            "proyeccion_fin_de_mes_ars": 202692.0,
+            "por_categoria": [...]
+        }
+    """
+    import calendar
+
+    hoy = date.today()
+    dias_transcurridos = hoy.day
+    dias_totales = calendar.monthrange(hoy.year, hoy.month)[1]
+
+    r = resumen_mensual(hoy.month, hoy.year)
+    gastado = r["total_ars"]
+
+    if dias_transcurridos > 0:
+        promedio_diario = round(gastado / dias_transcurridos, 2)
+        proyectado = round(gastado / dias_transcurridos * dias_totales, 2)
+    else:
+        promedio_diario = 0.0
+        proyectado = 0.0
+
+    return {
+        "mes": hoy.month,
+        "anio": hoy.year,
+        "dias_transcurridos": dias_transcurridos,
+        "dias_totales": dias_totales,
+        "gastado_hasta_hoy": gastado,
+        "promedio_diario_ars": promedio_diario,
+        "proyeccion_fin_de_mes_ars": proyectado,
+        "por_categoria": r["por_categoria"],
     }

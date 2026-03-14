@@ -1,4 +1,21 @@
+# Entornos virtuales
+bot/.venv/
 .venv/
+
+# Variables de entorno (NUNCA commitear)
+bot/.env
+.env
+*.env
+
+# Python
 __pycache__/
 *.pyc
-.env
+*.pyo
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

@@ -42,7 +42,7 @@ export async function materializarRecurrentesAction(): Promise<{
   if (errFetch) throw new Error(errFetch.message)
   if (!recurrentes || recurrentes.length === 0) return { insertados: 0, omitidos: 0, errores: [] }
 
-  const tc_blue = await getLatestTipoCambio('blue')
+  const tc_blue = await getLatestTipoCambio('oficial')
 
   let insertados = 0
   let omitidos = 0
@@ -73,7 +73,7 @@ export async function materializarRecurrentesAction(): Promise<{
           moneda,
           monto_ars,
           tipo_cambio: moneda === 'USD' ? (tc_blue ?? 1) : 1,
-          tipo_cambio_tipo: moneda === 'USD' ? 'blue' : 'n/a',
+          tipo_cambio_tipo: moneda === 'USD' ? 'oficial' : 'n/a',
           categoria: r.categoria,
           medio_pago: r.medio_pago,
           fecha: r.proximo_vencimiento,

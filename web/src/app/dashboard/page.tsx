@@ -19,7 +19,7 @@ export default async function DashboardPage() {
     getResumenMes(mesAnterior, anioAnterior, categorias),
     getGastosRecientes(10),
     getRecurrentesConCosto(),
-    getLatestTipoCambio('blue'),
+    getLatestTipoCambio('oficial'),
     getCuotasActivas(),
   ])
 
@@ -78,7 +78,7 @@ export default async function DashboardPage() {
             />
             {equivalenteUSD !== null ? (
               <SummaryCard
-                title="Equivalente USD (blue)"
+                title="Equivalente USD (oficial)"
                 value={`USD ${equivalenteUSD.toLocaleString('es-AR')}`}
                 subtitle={`TC $${tcBlue?.toLocaleString('es-AR')}`}
                 icon="💵"

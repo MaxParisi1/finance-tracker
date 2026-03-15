@@ -363,7 +363,7 @@ export async function getRecurrentesConCosto(): Promise<{
 }> {
   const [recurrentes, tc_blue] = await Promise.all([
     getRecurrentes(),
-    getLatestTipoCambio('blue'),
+    getLatestTipoCambio('oficial'),
   ])
 
   const hoy = new Date()

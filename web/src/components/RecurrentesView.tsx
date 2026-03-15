@@ -80,7 +80,7 @@ export default function RecurrentesView({
             <p className="text-2xl font-bold text-gray-900 mt-1">
               USD {Math.round(total_mensual_ars / tc_blue).toLocaleString('es-AR')}
             </p>
-            <p className="text-xs text-gray-400 mt-0.5">TC blue ${tc_blue.toLocaleString('es-AR')}</p>
+            <p className="text-xs text-gray-400 mt-0.5">TC oficial ${tc_blue.toLocaleString('es-AR')}</p>
           </div>
         )}
       </div>
@@ -180,10 +180,7 @@ export default function RecurrentesView({
                           ? `USD ${r.monto_original.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
                           : formatARS(r.monto_original)}
                       </p>
-                      {r.frecuencia !== 'mensual' && (
-                        <p className="text-xs text-gray-400 mt-0.5">≈ {formatARS(r.mensual_ars)}/mes</p>
-                      )}
-                      {r.moneda === 'USD' && tc_blue && (
+                      {(r.frecuencia !== 'mensual' || (r.moneda === 'USD' && tc_blue)) && (
                         <p className="text-xs text-gray-400 mt-0.5">≈ {formatARS(r.mensual_ars)}/mes</p>
                       )}
                     </div>

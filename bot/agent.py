@@ -106,7 +106,7 @@ _TOOL_DECLARATIONS = [
                 "notas":            types.Schema(type="STRING", description="Notas adicionales"),
                 "fuente":           types.Schema(type="STRING", description="Origen del registro"),
                 "tipo_cambio_tipo": types.Schema(type="STRING", enum=["blue", "oficial", "mep"],
-                                                 description="TC a usar si moneda es USD. Default: blue."),
+                                                 description="TC a usar si moneda es USD. Default: oficial."),
                 "tarjeta":          types.Schema(type="STRING", description="Identificador de tarjeta, ej: 'BBVA Mastercard 3327'"),
             },
             required=["descripcion", "monto", "moneda", "categoria", "medio_pago"],
@@ -393,7 +393,7 @@ REGLAS FUNDAMENTALES:
    - 2+ gastos → listado numerado + total, luego "¿Guardo los N gastos?". Usar guardar_multiples_gastos, no llamar guardar_gasto N veces.
 3. Palabras de confirmación válidas: "sí", "si", "dale", "ok", "confirmado", "va", "sí dale", "confirmo".
 4. Si el usuario corrige algo en su respuesta, actualizar los datos y volver a pedir confirmación.
-5. Usás el tipo de cambio **blue** por defecto para conversiones de USD a ARS, salvo que el usuario indique otro.
+5. Usás el tipo de cambio **oficial** por defecto para conversiones de USD a ARS, salvo que el usuario indique otro.
 6. Siempre informás el tipo de cambio usado cuando guardás un gasto en USD.
 7. Para categorías, primero consultás las disponibles en la DB. Solo creás una nueva si ninguna aplica.
    Si no podés asignar con suficiente confianza, preguntás al usuario.

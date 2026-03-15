@@ -36,7 +36,7 @@ def guardar_gasto(
     comercio: str | None = None,
     notas: str | None = None,
     fuente: str = "telegram_texto",
-    tipo_cambio_tipo: str = "blue",
+    tipo_cambio_tipo: str = "oficial",
     tarjeta: str | None = None,
 ) -> dict:
     """

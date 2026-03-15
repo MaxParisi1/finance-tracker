@@ -1,7 +1,7 @@
 import Sidebar from '@/components/Sidebar'
 import SummaryCard from '@/components/SummaryCard'
 import ExpenseTable from '@/components/ExpenseTable'
-import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getLatestTipoCambio } from '@/lib/queries'
+import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getLatestTipoCambio, getPresupuestosConGasto } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -14,12 +14,13 @@ export default async function DashboardPage() {
   const anioAnterior = mes === 1 ? anio - 1 : anio
 
   const categorias = await getCategorias()
-  const [resumenActual, resumenAnterior, recientes, recurrentes, tcBlue] = await Promise.all([
+  const [resumenActual, resumenAnterior, recientes, recurrentes, tcBlue, presupuestos] = await Promise.all([
     getResumenMes(mes, anio, categorias),
     getResumenMes(mesAnterior, anioAnterior, categorias),
     getGastosRecientes(10),
     getRecurrentesConCosto(),
     getLatestTipoCambio('blue'),
+    getPresupuestosConGasto(mes, anio),
   ])
 
   const variacion =
@@ -45,7 +46,7 @@ export default async function DashboardPage() {
     <div className="flex min-h-screen">
       <Sidebar />
 
-      <main className="flex-1 px-8 py-8 overflow-auto">
+      <main className="flex-1 px-4 md:px-8 py-6 md:py-8 pb-24 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="mb-8">
@@ -177,6 +178,48 @@ export default async function DashboardPage() {
               </a>
             </div>
           </div>
+
+          {/* Presupuestos */}
+          {presupuestos.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 mb-6">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 className="text-base font-semibold text-gray-900">Presupuestos del mes</h2>
+                <a href="/presupuestos" className="text-sm text-emerald-600 hover:underline">
+                  Gestionar →
+                </a>
+              </div>
+              <div className="px-6 py-4 space-y-4">
+                {presupuestos.map(p => {
+                  const excedido = p.pct > 100
+                  const cercano = p.pct >= 80 && p.pct <= 100
+                  return (
+                    <div key={p.id}>
+                      <div className="flex justify-between text-sm mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-700">{p.categoria}</span>
+                          {excedido && (
+                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">
+                              Excedido
+                            </span>
+                          )}
+                        </div>
+                        <span className={`font-medium ${excedido ? 'text-red-600' : cercano ? 'text-amber-600' : 'text-gray-900'}`}>
+                          {formatARS(p.gastado)}{' '}
+                          <span className="text-gray-400 font-normal">/ {formatARS(p.monto_limite)}</span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${excedido ? 'bg-red-500' : cercano ? 'bg-amber-400' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(p.pct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Últimos gastos */}
           <div className="bg-white rounded-xl border border-gray-200">

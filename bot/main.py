@@ -26,7 +26,7 @@ from bot.tools.media_processor import (
     audio_a_mensaje,
 )
 from bot.tools.bbva_parser import importar_pdf_bbva
-from bot.db.queries import obtener_gastos
+from bot.db.queries import obtener_gastos, cargar_historial_bot, guardar_historial_bot
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -37,11 +37,11 @@ logger = logging.getLogger(__name__)
 # ID de Telegram del único usuario autorizado
 ALLOWED_USER_ID = int(os.environ["ALLOWED_TELEGRAM_USER_ID"])
 
-# Historial de conversación en memoria (por chat_id)
+# Historial de conversación: cache en memoria + persistencia en Supabase
 # Estructura: { chat_id: [{"role": "user"|"model", "parts": ["..."]}] }
 _conversation_history: dict[int, list[dict]] = {}
 
-MAX_HISTORY_TURNS = 20  # Máximo de turnos a mantener en memoria
+MAX_HISTORY_TURNS = 20
 
 
 async def safe_reply(message, text: str) -> None:
@@ -58,16 +58,26 @@ def _is_authorized(update: Update) -> bool:
 
 
 def _get_history(chat_id: int) -> list[dict]:
-    return _conversation_history.get(chat_id, [])
+    """Devuelve historial desde cache en memoria; si no existe, carga desde DB."""
+    if chat_id not in _conversation_history:
+        try:
+            _conversation_history[chat_id] = cargar_historial_bot(chat_id)
+        except Exception:
+            _conversation_history[chat_id] = []
+    return _conversation_history[chat_id]
 
 
 def _add_to_history(chat_id: int, role: str, text: str) -> None:
     if chat_id not in _conversation_history:
         _conversation_history[chat_id] = []
     _conversation_history[chat_id].append({"role": role, "parts": [text]})
-    # Recortar historial para no crecer infinitamente (conservar los últimos N turnos)
     if len(_conversation_history[chat_id]) > MAX_HISTORY_TURNS * 2:
         _conversation_history[chat_id] = _conversation_history[chat_id][-MAX_HISTORY_TURNS * 2:]
+    # Persistir en Supabase (best-effort)
+    try:
+        guardar_historial_bot(chat_id, _conversation_history[chat_id])
+    except Exception:
+        pass
 
 
 # ──────────────────────────────────────────────

@@ -48,6 +48,14 @@ export interface MensualResumen {
   por_categoria: { categoria: string; total_ars: number; cantidad: number; color?: string }[]
 }
 
+export interface Presupuesto {
+  id: string
+  categoria: string
+  mes: number
+  anio: number
+  monto_limite: number
+}
+
 export interface TendenciaMes {
   mes: number
   anio: number

@@ -3,9 +3,21 @@ Herramientas de escritura y lectura de gastos.
 Estas funciones son las que el agente llama como "tools".
 """
 
+import calendar
+import logging
 from datetime import date, datetime
 from bot.db import queries
 from bot.tools.tipo_cambio import convertir_usd_a_ars, obtener_tipo_cambio
+
+logger = logging.getLogger(__name__)
+
+
+def _siguiente_mes(d: date) -> date:
+    """Avanza la fecha exactamente un mes, ajustando el día si es necesario."""
+    if d.month == 12:
+        return d.replace(year=d.year + 1, month=1)
+    ultimo = calendar.monthrange(d.year, d.month + 1)[1]
+    return d.replace(month=d.month + 1, day=min(d.day, ultimo))
 
 
 # ──────────────────────────────────────────────
@@ -50,6 +62,7 @@ def guardar_gasto(
     """
     moneda = moneda.upper()
     if moneda not in ("ARS", "USD"):
+        logger.warning("guardar_gasto: moneda inválida=%r", moneda)
         raise ValueError(f"Moneda inválida: '{moneda}'. Usar 'ARS' o 'USD'.")
 
     fecha_gasto = fecha or date.today().isoformat()
@@ -82,7 +95,18 @@ def guardar_gasto(
         gasto["tipo_cambio"] = 1.0
         gasto["tipo_cambio_tipo"] = "n/a"
 
-    return queries.insertar_gasto(gasto)
+    primer_registro = queries.insertar_gasto(gasto)
+    logger.info("guardar_gasto ok: %r monto_ars=%s cuotas=%s", descripcion, gasto.get("monto_ars"), cuotas)
+
+    # Auto-generar cuotas 2..N si corresponde
+    if cuotas > 1 and cuota_actual == 1:
+        fecha_cuota = date.fromisoformat(fecha_gasto)
+        for n in range(2, cuotas + 1):
+            fecha_cuota = _siguiente_mes(fecha_cuota)
+            cuota_extra = {**gasto, "fecha": fecha_cuota.isoformat(), "cuota_actual": n}
+            queries.insertar_gasto(cuota_extra)
+
+    return primer_registro
 
 
 def guardar_multiples_gastos(gastos: list[dict]) -> dict:

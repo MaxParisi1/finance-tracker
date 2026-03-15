@@ -8,13 +8,14 @@ const NAV_ITEMS = [
   { href: '/gastos', label: 'Gastos', icon: '💳' },
   { href: '/analytics', label: 'Analíticas', icon: '📊' },
   { href: '/recurrentes', label: 'Recurrentes', icon: '🔁' },
+  { href: '/presupuestos', label: 'Presupuestos', icon: '🎯' },
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="w-56 min-h-screen bg-gray-900 flex flex-col">
+    <aside className="hidden md:flex w-56 min-h-screen bg-gray-900 flex-col">
       {/* Logo */}
       <div className="px-6 py-6 border-b border-gray-800">
         <div className="flex items-center gap-2">

@@ -26,6 +26,7 @@ export async function getGastosMes(mes: number, anio: number): Promise<Gasto[]> 
   const { data, error } = await supabase
     .from('gastos')
     .select('*')
+    .is('deleted_at', null)
     .gte('fecha', desde)
     .lt('fecha', hasta)
     .order('fecha', { ascending: false })
@@ -39,8 +40,26 @@ export async function getGastosRecientes(limit = 10): Promise<Gasto[]> {
   const { data, error } = await supabase
     .from('gastos')
     .select('*')
+    .is('deleted_at', null)
     .order('fecha', { ascending: false })
     .limit(limit)
+
+  if (error) throw error
+  return data ?? []
+}
+
+export async function searchGastos(q: string): Promise<Gasto[]> {
+  const supabase = getSupabaseServer()
+  const term = q.trim()
+  if (!term) return []
+
+  const { data, error } = await supabase
+    .from('gastos')
+    .select('*')
+    .is('deleted_at', null)
+    .or(`descripcion.ilike.%${term}%,comercio.ilike.%${term}%`)
+    .order('fecha', { ascending: false })
+    .limit(200)
 
   if (error) throw error
   return data ?? []
@@ -235,6 +254,39 @@ export async function getPaymentMethodBreakdown(
 // ──────────────────────────────────────────────
 // Recurrentes con costo mensual calculado
 // ──────────────────────────────────────────────
+
+// ──────────────────────────────────────────────
+// Presupuestos
+// ──────────────────────────────────────────────
+
+export async function getPresupuestos(mes: number, anio: number) {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('presupuestos')
+    .select('*')
+    .eq('mes', mes)
+    .eq('anio', anio)
+
+  if (error) throw error
+  return (data ?? []) as { id: string; categoria: string; mes: number; anio: number; monto_limite: number }[]
+}
+
+export async function getPresupuestosConGasto(mes: number, anio: number) {
+  const [presupuestos, resumen] = await Promise.all([
+    getPresupuestos(mes, anio),
+    getResumenMes(mes, anio),
+  ])
+
+  const gastoMap = Object.fromEntries(
+    resumen.por_categoria.map(c => [c.categoria, c.total_ars]),
+  )
+
+  return presupuestos.map(p => ({
+    ...p,
+    gastado: gastoMap[p.categoria] ?? 0,
+    pct: p.monto_limite > 0 ? Math.round(((gastoMap[p.categoria] ?? 0) / p.monto_limite) * 100) : 0,
+  }))
+}
 
 export interface RecurrenteConCosto extends GastoRecurrente {
   mensual_ars: number

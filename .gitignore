@@ -6,6 +6,10 @@ bot/.venv/
 bot/.env
 .env
 *.env
+.env.local
+.env*.local
+**/.env.local
+**/.env*.local
 
 # Python
 __pycache__/
@@ -19,3 +23,7 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Build artifacts
+web/.next/
+web/out/

@@ -1,3 +1,4 @@
+import '@/lib/env'
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import {
@@ -17,6 +18,26 @@ import {
   getRecurrentesConCosto,
 } from '@/lib/queries'
 import { getSupabaseServer } from '@/lib/supabase'
+
+// ──────────────────────────────────────────────
+// Rate limiting (protege la cuota de Gemini)
+// ──────────────────────────────────────────────
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT_WINDOW_MS = 60_000 // 1 minuto
+const RATE_LIMIT_MAX = 30            // 30 requests por minuto
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(ip)
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return true
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false
+  entry.count++
+  return true
+}
 
 // ──────────────────────────────────────────────
 // Auth check
@@ -258,7 +279,34 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
           .single()
 
         if (error) throw new Error(error.message)
-        resultado = { guardado: true, id: data.id, monto_ars: Math.round(monto_ars) }
+
+        // Auto-expandir cuotas 2..N
+        if (cuotas && cuotas > 1) {
+          let fechaCuota = (fecha ?? new Date().toISOString().split('T')[0]) as string
+          for (let n = 2; n <= cuotas; n++) {
+            fechaCuota = addOneMonth(fechaCuota)
+            await supabase.from('gastos').insert({
+              ...{
+                descripcion,
+                monto_original: monto,
+                moneda: monedaUpper,
+                monto_ars: Math.round(monto_ars),
+                tipo_cambio,
+                tipo_cambio_tipo,
+                categoria,
+                medio_pago,
+                notas: notas ?? null,
+                fuente: 'web_manual',
+                cuotas,
+                cuota_actual: 1,
+              },
+              fecha: fechaCuota,
+              cuota_actual: n,
+            })
+          }
+        }
+
+        resultado = { guardado: true, id: data.id, monto_ars: Math.round(monto_ars), cuotas: cuotas ?? 1 }
         break
       }
 
@@ -276,9 +324,21 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
 // Handler
 // ──────────────────────────────────────────────
 
+/** Suma exactamente un mes a una fecha YYYY-MM-DD */
+function addOneMonth(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  // new Date(y, m, d): month es 0-indexed, así que m == siguiente mes
+  return new Date(y, m, d).toISOString().split('T')[0]
+}
+
 export async function POST(req: NextRequest) {
   if (!isAuthorized()) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+  }
+
+  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'local'
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: 'Demasiadas solicitudes. Esperá un momento.' }, { status: 429 })
   }
 
   const apiKey = process.env.GOOGLE_API_KEY
@@ -323,6 +383,7 @@ REGLAS:
 
   try {
     let response = await chat.sendMessage(message)
+    let dataMutated = false
 
     // Loop de function calling (máximo 5 iteraciones)
     for (let i = 0; i < 5; i++) {
@@ -330,19 +391,25 @@ REGLAS:
       if (!calls || calls.length === 0) break
 
       const functionResponses = await Promise.all(
-        calls.map(async fc => ({
-          functionResponse: {
-            name: fc.name,
-            response: { result: await ejecutarFuncion(fc.name, fc.args as Record<string, any>) },
-          },
-        })),
+        calls.map(async fc => {
+          const result = await ejecutarFuncion(fc.name, fc.args as Record<string, any>)
+          if (fc.name === 'guardar_gasto') {
+            try {
+              const parsed = JSON.parse(result)
+              if (parsed.guardado) dataMutated = true
+            } catch {}
+          }
+          return {
+            functionResponse: { name: fc.name, response: { result } },
+          }
+        }),
       )
 
       response = await chat.sendMessage(functionResponses)
     }
 
     const text = response.response.text()
-    return NextResponse.json({ response: text })
+    return NextResponse.json({ response: text, mutated: dataMutated })
   } catch (e: any) {
     console.error('Chat API error:', e)
     return NextResponse.json({ error: e.message ?? 'Error interno' }, { status: 500 })

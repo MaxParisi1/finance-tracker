@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
 import { getLatestTipoCambio } from '@/lib/queries'
+import { updateGastoSchema } from '@/lib/validation'
 
 export async function updateGastoAction(
   id: string,
@@ -16,6 +17,9 @@ export async function updateGastoAction(
     notas?: string
   },
 ) {
+  const parsed = updateGastoSchema.safeParse(fields)
+  if (!parsed.success) throw new Error(parsed.error.errors[0].message)
+
   const supabase = getSupabaseServer()
   const monedaUpper = fields.moneda.toUpperCase()
 
@@ -55,7 +59,10 @@ export async function updateGastoAction(
 
 export async function deleteGastoAction(id: string) {
   const supabase = getSupabaseServer()
-  const { error } = await supabase.from('gastos').delete().eq('id', id)
+  const { error } = await supabase
+    .from('gastos')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/gastos')
   revalidatePath('/dashboard')

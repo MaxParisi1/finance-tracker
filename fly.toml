@@ -1,21 +1,16 @@
-[app]
-name = "finance-bot"
-primary_region = "gru"  # São Paulo — el más cercano a Argentina
+app = "finance-bot-max"
+primary_region = "gru"
 
 [build]
-dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
-PYTHONUNBUFFERED = "1"
-
-# Sin [http_service] — el bot usa polling, no necesita puerto expuesto
+  PYTHONUNBUFFERED = "1"
 
 [[vm]]
-size = "shared-cpu-1x"
-memory = "256mb"
+  size = "shared-cpu-1x"
+  memory = "256mb"
 
 [deploy]
-strategy = "rolling"
-
-[machine]
-min_machines_running = 1  # Nunca suspender la VM
+  strategy = "rolling"
+  min_machines_running = 1

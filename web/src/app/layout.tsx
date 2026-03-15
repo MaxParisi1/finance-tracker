@@ -29,7 +29,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
-      <body className="bg-gray-50 text-gray-900 antialiased">
+      <body
+        className="bg-gray-50 text-gray-900 antialiased"
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' } as React.CSSProperties}
+      >
         {children}
         <ChatPanel />
         <BottomNav />

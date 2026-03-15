@@ -17,7 +17,10 @@ export default function BottomNav() {
   if (pathname === '/login') return null
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex z-40 pb-safe">
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex z-40"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' } as React.CSSProperties}
+    >
       {NAV_ITEMS.map(item => {
         const active = pathname.startsWith(item.href)
         return (

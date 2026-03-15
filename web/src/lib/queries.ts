@@ -288,6 +288,68 @@ export async function getPresupuestosConGasto(mes: number, anio: number) {
   }))
 }
 
+// ──────────────────────────────────────────────
+// Cuotas activas
+// ──────────────────────────────────────────────
+
+export interface CuotaActiva {
+  descripcion: string
+  comercio: string | null
+  categoria: string
+  cuotas: number
+  cuota_pendiente: number
+  monto_original: number
+  moneda: string
+  monto_ars: number
+  proxima_fecha: string
+  fecha_fin: string
+}
+
+export async function getCuotasActivas(): Promise<CuotaActiva[]> {
+  const supabase = getSupabaseServer()
+  const hoy = new Date().toISOString().split('T')[0]
+
+  const { data, error } = await supabase
+    .from('gastos')
+    .select('descripcion, comercio, cuotas, cuota_actual, monto_original, moneda, monto_ars, fecha, categoria')
+    .gt('cuotas', 1)
+    .is('deleted_at', null)
+    .order('fecha', { ascending: true })
+
+  if (error || !data) return []
+
+  const groups = new Map<string, typeof data>()
+  for (const g of data) {
+    const key = `${g.descripcion}||${g.cuotas}||${g.monto_original}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(g)
+  }
+
+  const result: CuotaActiva[] = []
+  for (const items of groups.values()) {
+    const pending = items.filter(i => i.fecha >= hoy)
+    if (pending.length === 0) continue
+
+    const allSorted = [...items].sort((a, b) => a.cuota_actual - b.cuota_actual)
+    const pendingSorted = [...pending].sort((a, b) => a.cuota_actual - b.cuota_actual)
+
+    result.push({
+      descripcion: items[0].descripcion,
+      comercio: items[0].comercio,
+      categoria: items[0].categoria,
+      cuotas: items[0].cuotas,
+      cuota_pendiente: pendingSorted[0].cuota_actual,
+      monto_original: items[0].monto_original,
+      moneda: items[0].moneda,
+      monto_ars: pendingSorted[0].monto_ars,
+      proxima_fecha: pendingSorted[0].fecha,
+      fecha_fin: allSorted[allSorted.length - 1].fecha,
+    })
+  }
+
+  return result.sort((a, b) => a.proxima_fecha.localeCompare(b.proxima_fecha))
+}
+
 export interface RecurrenteConCosto extends GastoRecurrente {
   mensual_ars: number
   dias_para_vencimiento: number

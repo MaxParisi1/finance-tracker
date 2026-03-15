@@ -1,7 +1,7 @@
 import Sidebar from '@/components/Sidebar'
 import SummaryCard from '@/components/SummaryCard'
 import ExpenseTable from '@/components/ExpenseTable'
-import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getLatestTipoCambio, getPresupuestosConGasto } from '@/lib/queries'
+import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getLatestTipoCambio, getCuotasActivas } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -14,13 +14,13 @@ export default async function DashboardPage() {
   const anioAnterior = mes === 1 ? anio - 1 : anio
 
   const categorias = await getCategorias()
-  const [resumenActual, resumenAnterior, recientes, recurrentes, tcBlue, presupuestos] = await Promise.all([
+  const [resumenActual, resumenAnterior, recientes, recurrentes, tcBlue, cuotasActivas] = await Promise.all([
     getResumenMes(mes, anio, categorias),
     getResumenMes(mesAnterior, anioAnterior, categorias),
     getGastosRecientes(10),
     getRecurrentesConCosto(),
     getLatestTipoCambio('blue'),
-    getPresupuestosConGasto(mes, anio),
+    getCuotasActivas(),
   ])
 
   const variacion =
@@ -37,7 +37,6 @@ export default async function DashboardPage() {
     ? Math.round(resumenActual.total_ars / tcBlue)
     : null
 
-  // Recurrentes que vencen en los próximos 7 días
   const proximosVencimientos = recurrentes.recurrentes.filter(
     r => r.dias_para_vencimiento >= 0 && r.dias_para_vencimiento <= 7,
   )
@@ -179,47 +178,46 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          {/* Presupuestos */}
-          {presupuestos.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 mb-6">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                <h2 className="text-base font-semibold text-gray-900">Presupuestos del mes</h2>
-                <a href="/presupuestos" className="text-sm text-emerald-600 hover:underline">
-                  Gestionar →
-                </a>
-              </div>
-              <div className="px-6 py-4 space-y-4">
-                {presupuestos.map(p => {
-                  const excedido = p.pct > 100
-                  const cercano = p.pct >= 80 && p.pct <= 100
+          {/* Cuotas activas */}
+          <div className="bg-white rounded-xl border border-gray-200 mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-base font-semibold text-gray-900">Cuotas activas</h2>
+            </div>
+            {cuotasActivas.length === 0 ? (
+              <p className="px-6 py-4 text-sm text-gray-400">Sin cuotas activas.</p>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {cuotasActivas.map((c, i) => {
+                  const pct = Math.round((c.cuota_pendiente / c.cuotas) * 100)
+                  const fechaFin = new Date(c.fecha_fin + 'T00:00:00').toLocaleDateString('es-AR', { month: 'short', year: 'numeric' })
+                  const proximoPago = new Date(c.proxima_fecha + 'T00:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
                   return (
-                    <div key={p.id}>
-                      <div className="flex justify-between text-sm mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-700">{p.categoria}</span>
-                          {excedido && (
-                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">
-                              Excedido
-                            </span>
-                          )}
+                    <div key={i} className="px-6 py-4">
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {c.comercio || c.descripcion}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            Cuota {c.cuota_pendiente} de {c.cuotas} · próx. {proximoPago} · termina {fechaFin}
+                          </p>
                         </div>
-                        <span className={`font-medium ${excedido ? 'text-red-600' : cercano ? 'text-amber-600' : 'text-gray-900'}`}>
-                          {formatARS(p.gastado)}{' '}
-                          <span className="text-gray-400 font-normal">/ {formatARS(p.monto_limite)}</span>
+                        <span className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                          {c.moneda === 'USD' ? `USD ${c.monto_original}` : formatARS(c.monto_ars)}/mes
                         </span>
                       </div>
                       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${excedido ? 'bg-red-500' : cercano ? 'bg-amber-400' : 'bg-emerald-500'}`}
-                          style={{ width: `${Math.min(p.pct, 100)}%` }}
+                          className="h-full bg-blue-400 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
                         />
                       </div>
                     </div>
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Últimos gastos */}
           <div className="bg-white rounded-xl border border-gray-200">

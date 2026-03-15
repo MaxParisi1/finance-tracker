@@ -30,8 +30,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
       <body className="bg-gray-50 text-gray-900 antialiased">
-        {/* Cubre el Dynamic Island / notch en modo PWA standalone */}
-        <div className="md:hidden fixed top-0 inset-x-0 z-50 bg-gray-900 pt-safe" />
         {children}
         <ChatPanel />
         <BottomNav />

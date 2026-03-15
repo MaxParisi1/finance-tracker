@@ -30,7 +30,7 @@ export default async function GastosPage({
     <div className="flex min-h-screen">
       <Sidebar />
 
-      <main className="flex-1 px-4 md:px-8 pt-safe-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
+      <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="flex items-start justify-between mb-6">

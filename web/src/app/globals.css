@@ -1,3 +1,24 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+  }
+}
+
+@layer utilities {
+  /* Safe area base utilities */
+  .pt-safe   { padding-top:    var(--sat); }
+  .pb-safe   { padding-bottom: var(--sab); }
+  .pl-safe   { padding-left:   var(--sal); }
+  .pr-safe   { padding-right:  var(--sar); }
+
+  /* Combined: safe area + content spacing */
+  .pt-safe-6  { padding-top:    calc(var(--sat) + 1.5rem); }
+  .pb-safe-24 { padding-bottom: calc(var(--sab) + 6rem);   }
+}

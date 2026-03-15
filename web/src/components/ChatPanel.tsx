@@ -129,7 +129,7 @@ export default function ChatPanel() {
     <>
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-[88px] md:bottom-24 right-2 left-2 md:left-auto md:right-6 z-50 md:w-[380px] max-h-[80vh] md:max-h-none md:h-[520px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed bottom-[calc(var(--sab)_+_5.5rem)] md:bottom-24 right-2 left-2 md:left-auto md:right-6 z-50 md:w-[380px] max-h-[80vh] md:max-h-none md:h-[520px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-900 text-white">
             <div className="flex items-center gap-2">
@@ -252,7 +252,7 @@ export default function ChatPanel() {
       {/* Botón flotante */}
       <button
         onClick={() => setOpen(prev => !prev)}
-        className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all ${
+        className={`fixed bottom-[calc(var(--sab)_+_5rem)] md:bottom-6 right-4 md:right-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all ${
           open
             ? 'bg-gray-800 hover:bg-gray-700 text-white rotate-0'
             : 'bg-emerald-600 hover:bg-emerald-700 text-white'

@@ -53,7 +53,7 @@ export default async function AnalyticsPage() {
     <div className="flex min-h-screen">
       <Sidebar />
 
-      <main className="flex-1 px-4 md:px-8 py-6 md:py-8 pb-24 md:pb-8 overflow-auto">
+      <main className="flex-1 px-4 md:px-8 pt-safe-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-gray-900">Analíticas</h1>

@@ -36,6 +36,7 @@ export async function materializarRecurrentesAction(): Promise<{
     .from('gastos_recurrentes')
     .select('*')
     .eq('activo', true)
+    .eq('no_materializar', false)
     .lte('proximo_vencimiento', hoy)
 
   if (errFetch) throw new Error(errFetch.message)
@@ -118,6 +119,7 @@ export async function createRecurrenteAction(fields: {
   medio_pago: string
   frecuencia: string
   dia_del_mes: number
+  no_materializar?: boolean
 }) {
   const parsed = recurrenteSchema.safeParse(fields)
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
@@ -146,6 +148,7 @@ export async function updateRecurrenteAction(
     medio_pago: string
     frecuencia: string
     dia_del_mes: number
+    no_materializar?: boolean
   },
 ) {
   const parsed = recurrenteSchema.safeParse(fields)

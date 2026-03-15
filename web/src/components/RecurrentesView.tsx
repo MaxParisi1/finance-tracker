@@ -58,7 +58,7 @@ export default function RecurrentesView({
     })
   }
 
-  const pendingCount = recurrentes.filter(r => r.dias_para_vencimiento <= 0).length
+  const pendingCount = recurrentes.filter(r => r.dias_para_vencimiento <= 0 && !r.no_materializar).length
 
   return (
     <>
@@ -144,17 +144,22 @@ export default function RecurrentesView({
                         <p className="text-sm font-medium text-gray-900 truncate">
                           {r.descripcion}
                         </p>
-                        {vencido && (
+                        {r.no_materializar && (
+                          <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+                            auto
+                          </span>
+                        )}
+                        {!r.no_materializar && vencido && (
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
                             Vencido
                           </span>
                         )}
-                        {urgente && !vencido && (
+                        {!r.no_materializar && urgente && !vencido && (
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
                             {r.dias_para_vencimiento === 0 ? '¡Hoy!' : `${r.dias_para_vencimiento}d`}
                           </span>
                         )}
-                        {proximo && (
+                        {!r.no_materializar && proximo && (
                           <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
                             {r.dias_para_vencimiento}d
                           </span>

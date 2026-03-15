@@ -30,6 +30,7 @@ export interface GastoRecurrente {
   dia_del_mes: number
   activo: boolean
   proximo_vencimiento: string
+  no_materializar: boolean
   created_at: string
 }
 

@@ -33,6 +33,7 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     medio_pago: recurrente?.medio_pago ?? 'debito',
     frecuencia: recurrente?.frecuencia ?? 'mensual',
     dia_del_mes: recurrente?.dia_del_mes ?? 1,
+    no_materializar: recurrente?.no_materializar ?? false,
   })
 
   function set(field: string, value: string | number) {
@@ -172,6 +173,19 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
               ))}
             </select>
           </div>
+
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.no_materializar}
+              onChange={e => setForm(prev => ({ ...prev, no_materializar: e.target.checked }))}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Se debita automáticamente de tarjeta</p>
+              <p className="text-xs text-gray-400 mt-0.5">No materializar — el gasto se registra solo vía email</p>
+            </div>
+          </label>
 
           {error && (
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>

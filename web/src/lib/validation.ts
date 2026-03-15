@@ -36,4 +36,5 @@ export const recurrenteSchema = z.object({
   medio_pago: z.enum(MEDIOS_PAGO),
   frecuencia: z.enum(FRECUENCIAS),
   dia_del_mes: z.number().int().min(1).max(31),
+  no_materializar: z.boolean().optional(),
 })

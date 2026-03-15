@@ -27,3 +27,7 @@ __pycache__/
 # Build artifacts
 web/.next/
 web/out/
+
+# Gmail OAuth (NUNCA commitear)
+bot/credentials.json
+bot/token.json

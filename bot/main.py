@@ -19,6 +19,7 @@ from telegram.ext import (
 )
 
 from bot.agent import run_agent, set_pdf_pendiente
+from bot.gmail_poller import start_gmail_polling
 from bot.tools.media_processor import (
     procesar_imagen_ticket,
     procesar_audio,
@@ -317,6 +318,8 @@ async def _run() -> None:
                 webhook_url=webhook_url,
                 url_path=token,
             )
+            if os.environ.get("GMAIL_REFRESH_TOKEN"):
+                asyncio.create_task(start_gmail_polling(app.bot, ALLOWED_USER_ID))
             await asyncio.Event().wait()
             await app.updater.stop()
             await app.stop()
@@ -325,6 +328,8 @@ async def _run() -> None:
         async with app:
             await app.start()
             await app.updater.start_polling()
+            if os.environ.get("GMAIL_REFRESH_TOKEN"):
+                asyncio.create_task(start_gmail_polling(app.bot, ALLOWED_USER_ID))
             await asyncio.Event().wait()
             await app.updater.stop()
             await app.stop()

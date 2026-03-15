@@ -37,6 +37,7 @@ def guardar_gasto(
     notas: str | None = None,
     fuente: str = "telegram_texto",
     tipo_cambio_tipo: str = "blue",
+    tarjeta: str | None = None,
 ) -> dict:
     """
     Guarda un gasto en la base de datos.
@@ -83,6 +84,8 @@ def guardar_gasto(
         gasto["comercio"] = comercio
     if notas:
         gasto["notas"] = notas
+    if tarjeta:
+        gasto["tarjeta"] = tarjeta
 
     if moneda == "USD":
         conversion = convertir_usd_a_ars(monto, tipo_cambio_tipo)

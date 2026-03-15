@@ -73,7 +73,15 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
-        filtros: { type: SchemaType.OBJECT, description: 'Filtros opcionales' },
+        filtros: {
+          type: SchemaType.OBJECT,
+          description: 'Filtros opcionales',
+          properties: {
+            mes: { type: SchemaType.INTEGER, description: 'Mes (1-12)' },
+            anio: { type: SchemaType.INTEGER, description: 'Año' },
+            categoria: { type: SchemaType.STRING, description: 'Categoría' },
+          },
+        },
       },
     },
   },

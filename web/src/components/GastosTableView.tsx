@@ -19,7 +19,7 @@ export default function GastosTableView({ gastos, categorias }: Props) {
   const [editing, setEditing] = useState<Gasto | null>(null)
 
   const mediosPago = useMemo(
-    () => [...new Set(gastos.map(g => g.medio_pago).filter(Boolean))].sort(),
+    () => Array.from(new Set(gastos.map(g => g.medio_pago).filter(Boolean))).sort(),
     [gastos],
   )
 

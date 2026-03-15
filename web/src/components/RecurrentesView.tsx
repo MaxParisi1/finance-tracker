@@ -46,7 +46,7 @@ export default function RecurrentesView({
     const cat = r.categoria ?? 'Sin categoría'
     porCategoria.set(cat, (porCategoria.get(cat) ?? 0) + r.mensual_ars)
   }
-  const categoriasSorted = [...porCategoria.entries()]
+  const categoriasSorted = Array.from(porCategoria.entries())
     .map(([cat, total]) => ({ cat, total }))
     .sort((a, b) => b.total - a.total)
 

@@ -113,7 +113,7 @@ export async function getResumenMes(
     porCategoria.set(cat, { total_ars: prev.total_ars + monto, cantidad: prev.cantidad + 1 })
   }
 
-  const por_categoria = [...porCategoria.entries()]
+  const por_categoria = Array.from(porCategoria.entries())
     .map(([categoria, v]) => ({
       categoria,
       total_ars: Math.round(v.total_ars),
@@ -171,7 +171,7 @@ export async function getTopComercios(
     })
   }
 
-  return [...map.entries()]
+  return Array.from(map.entries())
     .map(([nombre, v]) => ({ nombre, total_ars: Math.round(v.total_ars), cantidad: v.cantidad }))
     .sort((a, b) => b.total_ars - a.total_ars)
     .slice(0, limite)
@@ -242,7 +242,7 @@ export async function getPaymentMethodBreakdown(
     map.set(mp, { total_ars: prev.total_ars + (g.monto_ars ?? 0), cantidad: prev.cantidad + 1 })
   }
 
-  return [...map.entries()]
+  return Array.from(map.entries())
     .map(([medio_pago, v]) => ({
       medio_pago,
       total_ars: Math.round(v.total_ars),

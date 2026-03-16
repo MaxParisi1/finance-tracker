@@ -34,22 +34,32 @@ def _limpiar_json(text: str) -> str:
 # ──────────────────────────────────────────────
 
 _PROMPT_TICKET = """
-Analizá esta imagen de un ticket o factura y extraé la información en JSON con esta estructura exacta:
+Analizá esta imagen. Puede ser un ticket de compra, una factura, o un comprobante de transferencia/pago (ej: Mercado Pago, banco, billetera virtual).
+
+IMPORTANTE — Formato numérico argentino:
+- El punto (.) es separador de MILES. Ejemplo: $10.600 = diez mil seiscientos (10600), NO 10.6.
+- La coma (,) es separador decimal. Ejemplo: $1.250,50 = mil doscientos cincuenta con cincuenta centavos.
+- Siempre convertí el monto a un número float sin separadores de miles. $10.600 → 10600.0
+
+Extraé la información en JSON con esta estructura exacta:
 {
-  "comercio": "nombre del comercio o local (string, o null si no es visible)",
+  "tipo": "ticket" | "transferencia" | "factura",
+  "comercio": "nombre del comercio, destinatario o local (string, o null si no es visible)",
   "fecha": "fecha en formato YYYY-MM-DD (string, o null si no aparece)",
-  "monto_total": <número float con el total a pagar, o null>,
+  "monto_total": <número float SIN separadores de miles — ver regla arriba, o null>,
   "moneda": "ARS o USD",
+  "medio_pago": "transferencia | efectivo | tarjeta | null — según lo que muestre la imagen",
   "items": [
     {"descripcion": "...", "monto": 0.0}
   ],
-  "notas": "cualquier dato adicional relevante del ticket (string, o null)"
+  "notas": "cualquier dato adicional relevante (string, o null)"
 }
 
 Reglas:
-- Si el ticket no tiene fecha visible, usar null.
+- Si no tiene fecha visible, usar null.
 - Si hay ambigüedad en el total (subtotal vs total con impuestos), usar el total final.
 - Si la moneda no está explícita, asumir ARS.
+- Para comprobantes de transferencia: comercio = nombre del destinatario, medio_pago = "transferencia".
 - Respondé ÚNICAMENTE con el JSON válido, sin explicaciones ni texto adicional.
 """
 
@@ -160,13 +170,16 @@ def ticket_a_mensaje(datos: dict) -> str:
     if "error" in datos:
         return f"El usuario mandó una foto de ticket pero no pude extraer los datos: {datos['error']}"
 
-    partes = ["El usuario mandó una foto de ticket. Datos extraídos:"]
+    tipo = datos.get("tipo", "ticket")
+    partes = [f"El usuario mandó una foto de {tipo}. Datos extraídos:"]
     if datos.get("comercio"):
-        partes.append(f"- Comercio: {datos['comercio']}")
+        partes.append(f"- Comercio/Destinatario: {datos['comercio']}")
     if datos.get("monto_total") is not None:
         partes.append(f"- Monto total: {datos['monto_total']} {datos.get('moneda', 'ARS')}")
     if datos.get("fecha"):
         partes.append(f"- Fecha: {datos['fecha']}")
+    if datos.get("medio_pago"):
+        partes.append(f"- Medio de pago: {datos['medio_pago']}")
     if datos.get("notas"):
         partes.append(f"- Notas: {datos['notas']}")
 

@@ -181,7 +181,9 @@ export async function getTopComercios(
 // Tipo de cambio histórico
 // ──────────────────────────────────────────────
 
-export async function getLatestTipoCambio(tipo = 'blue'): Promise<number | null> {
+const BLUELYTICS_URL = 'https://api.bluelytics.com.ar/v2/latest'
+
+export async function getLatestTipoCambio(tipo = 'oficial'): Promise<number | null> {
   const supabase = getSupabaseServer()
   const { data } = await supabase
     .from('tipos_cambio_historico')
@@ -191,6 +193,50 @@ export async function getLatestTipoCambio(tipo = 'blue'): Promise<number | null>
     .limit(1)
 
   return data?.[0]?.valor ?? null
+}
+
+export interface TipoCambioInfo {
+  valor: number
+  fecha: string
+  esHoy: boolean
+}
+
+export async function getTipoCambioActual(tipo = 'oficial'): Promise<TipoCambioInfo | null> {
+  const supabase = getSupabaseServer()
+  const hoy = new Date().toISOString().split('T')[0]
+
+  // Always fetch from Bluelytics; Next.js Data Cache revalida cada hora
+  try {
+    const res = await fetch(BLUELYTICS_URL, { next: { revalidate: 3600 } })
+    if (!res.ok) throw new Error(`Bluelytics ${res.status}`)
+    const json = await res.json()
+
+    const keyMap: Record<string, string> = { oficial: 'oficial', blue: 'blue', mep: 'blue_euro' }
+    const cotizacion = json[keyMap[tipo] ?? 'oficial'] ?? json.oficial
+    const compra = parseFloat(cotizacion.value_buy)
+    const venta = parseFloat(cotizacion.value_sell)
+    const promedio = Math.round(((compra + venta) / 2) * 10000) / 10000
+
+    // Upsert en DB para historial (el bot también lo hace, esto lo complementa)
+    await supabase
+      .from('tipos_cambio_historico')
+      .upsert({ fecha: hoy, tipo, valor: promedio }, { onConflict: 'fecha,tipo' })
+
+    return { valor: promedio, fecha: hoy, esHoy: true }
+  } catch {
+    // Bluelytics no disponible → usar el registro más reciente de la DB
+    const { data: fallback } = await supabase
+      .from('tipos_cambio_historico')
+      .select('valor, fecha')
+      .eq('tipo', tipo)
+      .order('fecha', { ascending: false })
+      .limit(1)
+
+    if (fallback?.[0]) {
+      return { valor: fallback[0].valor, fecha: fallback[0].fecha, esHoy: fallback[0].fecha === hoy }
+    }
+    return null
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -360,11 +406,14 @@ export async function getRecurrentesConCosto(): Promise<{
   total_mensual_ars: number
   total_anual_ars: number
   tc_blue: number | null
+  tc_fecha: string | null
+  tc_es_hoy: boolean
 }> {
-  const [recurrentes, tc_blue] = await Promise.all([
+  const [recurrentes, tcInfo] = await Promise.all([
     getRecurrentes(),
-    getLatestTipoCambio('oficial'),
+    getTipoCambioActual('oficial'),
   ])
+  const tc_blue = tcInfo?.valor ?? null
 
   const hoy = new Date()
 
@@ -391,5 +440,7 @@ export async function getRecurrentesConCosto(): Promise<{
     total_mensual_ars,
     total_anual_ars: total_mensual_ars * 12,
     tc_blue,
+    tc_fecha: tcInfo?.fecha ?? null,
+    tc_es_hoy: tcInfo?.esHoy ?? false,
   }
 }

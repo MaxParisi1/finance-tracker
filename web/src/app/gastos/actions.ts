@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
-import { getLatestTipoCambio } from '@/lib/queries'
+import { getTipoCambioActual } from '@/lib/queries'
 import { updateGastoSchema } from '@/lib/validation'
 
 export async function updateGastoAction(
@@ -28,11 +28,12 @@ export async function updateGastoAction(
   let tipo_cambio_tipo = 'n/a'
 
   if (monedaUpper === 'USD') {
-    const tc = await getLatestTipoCambio('blue')
+    const tcInfo = await getTipoCambioActual('oficial')
+    const tc = tcInfo?.valor ?? null
     if (tc) {
       monto_ars = fields.monto * tc
       tipo_cambio = tc
-      tipo_cambio_tipo = 'blue'
+      tipo_cambio_tipo = 'oficial'
     }
   }
 

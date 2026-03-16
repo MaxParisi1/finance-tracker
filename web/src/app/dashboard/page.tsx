@@ -1,7 +1,7 @@
 import Sidebar from '@/components/Sidebar'
 import SummaryCard from '@/components/SummaryCard'
 import ExpenseTable from '@/components/ExpenseTable'
-import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getLatestTipoCambio, getCuotasActivas } from '@/lib/queries'
+import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getCuotasActivas } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -14,14 +14,14 @@ export default async function DashboardPage() {
   const anioAnterior = mes === 1 ? anio - 1 : anio
 
   const categorias = await getCategorias()
-  const [resumenActual, resumenAnterior, recientes, recurrentes, tcBlue, cuotasActivas] = await Promise.all([
+  const [resumenActual, resumenAnterior, recientes, recurrentes, cuotasActivas] = await Promise.all([
     getResumenMes(mes, anio, categorias),
     getResumenMes(mesAnterior, anioAnterior, categorias),
     getGastosRecientes(10),
     getRecurrentesConCosto(),
-    getLatestTipoCambio('oficial'),
     getCuotasActivas(),
   ])
+  const tcBlue = recurrentes.tc_blue
 
   const variacion =
     resumenAnterior.total_ars > 0
@@ -80,7 +80,7 @@ export default async function DashboardPage() {
               <SummaryCard
                 title="Equivalente USD (oficial)"
                 value={`USD ${equivalenteUSD.toLocaleString('es-AR')}`}
-                subtitle={`TC $${tcBlue?.toLocaleString('es-AR')}`}
+                subtitle={`TC $${tcBlue?.toLocaleString('es-AR')}${recurrentes.tc_es_hoy ? ' · hoy' : recurrentes.tc_fecha ? ` · ${recurrentes.tc_fecha}` : ''}`}
                 icon="💵"
               />
             ) : (

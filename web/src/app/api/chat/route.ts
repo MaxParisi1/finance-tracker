@@ -14,7 +14,7 @@ import {
   getTendencia,
   getTopComercios,
   getCategorias,
-  getLatestTipoCambio,
+  getTipoCambioActual,
   getRecurrentesConCosto,
 } from '@/lib/queries'
 import { getSupabaseServer } from '@/lib/supabase'
@@ -127,7 +127,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
-        tipo: { type: SchemaType.STRING, description: '"blue", "oficial" o "mep". Default: blue.' },
+        tipo: { type: SchemaType.STRING, description: '"blue", "oficial" o "mep". Default: oficial.' },
       },
     },
   },
@@ -221,7 +221,7 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
       }
 
       case 'obtener_tipo_cambio': {
-        const tipo = args.tipo ?? 'blue'
+        const tipo = args.tipo ?? 'oficial'
         const res = await fetch('https://api.bluelytics.com.ar/v2/latest', {
           next: { revalidate: 300 },
         })
@@ -258,11 +258,11 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
         let tipo_cambio_tipo = 'n/a'
 
         if (monedaUpper === 'USD') {
-          const tc = await getLatestTipoCambio('blue')
+          const tc = (await getTipoCambioActual('oficial'))?.valor ?? null
           if (tc) {
             monto_ars = monto * tc
             tipo_cambio = tc
-            tipo_cambio_tipo = 'blue'
+            tipo_cambio_tipo = 'oficial'
           }
         }
 
@@ -376,7 +376,7 @@ REGLAS:
 2. NUNCA guardás un gasto sin mostrar primero un resumen y recibir confirmación explícita.
    Formato: "Voy a guardar: **$MONTO MONEDA** en **DESCRIPCIÓN** (CATEGORÍA) · MEDIO_PAGO · FECHA. ¿Confirmo?"
 3. Confirmaciones válidas: "sí", "si", "dale", "ok", "confirmado", "va", "sí dale".
-4. Usás el tipo de cambio blue por defecto para conversiones USD → ARS.
+4. Usás el tipo de cambio oficial por defecto para conversiones USD → ARS.
 5. Las consultas responden con números concretos y formato ARS ($ 1.234.567).
 6. Cuando el usuario pide categorías, primero consultás las disponibles en la DB.`
 

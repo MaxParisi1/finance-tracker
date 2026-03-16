@@ -5,7 +5,7 @@ import { getRecurrentesConCosto, getCategorias } from '@/lib/queries'
 export const dynamic = 'force-dynamic'
 
 export default async function RecurrentesPage() {
-  const [{ recurrentes, total_mensual_ars, total_anual_ars, tc_blue }, categorias] = await Promise.all([
+  const [{ recurrentes, total_mensual_ars, total_anual_ars, tc_blue, tc_fecha, tc_es_hoy }, categorias] = await Promise.all([
     getRecurrentesConCosto(),
     getCategorias(),
   ])
@@ -29,6 +29,8 @@ export default async function RecurrentesPage() {
             total_mensual_ars={total_mensual_ars}
             total_anual_ars={total_anual_ars}
             tc_blue={tc_blue}
+            tc_fecha={tc_fecha}
+            tc_es_hoy={tc_es_hoy}
             categorias={categorias.map(c => c.nombre)}
           />
         </div>

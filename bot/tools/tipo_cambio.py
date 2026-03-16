@@ -11,7 +11,7 @@ from bot.db import queries
 BLUELYTICS_URL = "https://api.bluelytics.com.ar/v2/latest"
 
 
-def obtener_tipo_cambio(tipo: str = "blue") -> dict:
+def obtener_tipo_cambio(tipo: str = "oficial") -> dict:
     """
     Consulta el tipo de cambio actual desde bluelytics.
 
@@ -64,7 +64,7 @@ def obtener_tipo_cambio(tipo: str = "blue") -> dict:
     }
 
 
-def convertir_usd_a_ars(monto_usd: float, tipo: str = "blue") -> dict:
+def convertir_usd_a_ars(monto_usd: float, tipo: str = "oficial") -> dict:
     """
     Convierte un monto en USD a ARS usando el tipo de cambio indicado.
 

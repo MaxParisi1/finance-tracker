@@ -41,7 +41,7 @@ def guardar_gasto(
 ) -> dict:
     """
     Guarda un gasto en la base de datos.
-    Si la moneda es USD, convierte automáticamente a ARS usando el TC blue (por defecto).
+    Si la moneda es USD, convierte automáticamente a ARS usando el TC oficial (por defecto).
 
     Args:
         descripcion: Descripción del gasto.
@@ -56,7 +56,7 @@ def guardar_gasto(
         comercio: Nombre del comercio (opcional).
         notas: Notas adicionales (opcional).
         fuente: Origen del registro.
-        tipo_cambio_tipo: 'blue' (default), 'oficial' o 'mep'.
+        tipo_cambio_tipo: 'oficial' (default), 'blue' o 'mep'.
 
     Returns:
         El registro guardado como dict.

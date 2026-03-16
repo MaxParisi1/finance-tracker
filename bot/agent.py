@@ -254,7 +254,7 @@ _TOOL_DECLARATIONS = [
             type="OBJECT",
             properties={
                 "tipo": types.Schema(type="STRING", enum=["blue", "oficial", "mep"],
-                                     description="Tipo de cambio. Default: blue."),
+                                     description="Tipo de cambio. Default: oficial."),
             },
         ),
     ),
@@ -352,7 +352,7 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
         elif nombre == "gastos_recurrentes_activos":
             resultado = gastos_recurrentes_activos()
         elif nombre == "obtener_tipo_cambio":
-            resultado = obtener_tipo_cambio(args.get("tipo", "blue"))
+            resultado = obtener_tipo_cambio(args.get("tipo", "oficial"))
         elif nombre == "obtener_categorias":
             resultado = {"categorias": obtener_categorias_activas()}
         elif nombre == "tendencia_gastos":

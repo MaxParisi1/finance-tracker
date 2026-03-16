@@ -11,7 +11,7 @@ import {
   getCategorias,
   getDailySpending,
   getPaymentMethodBreakdown,
-  getLatestTipoCambio,
+  getTipoCambioActual,
 } from '@/lib/queries'
 import { formatARS, monthLabel, MEDIO_PAGO_LABELS } from '@/lib/utils'
 
@@ -24,7 +24,7 @@ export default async function AnalyticsPage() {
   const mesAnioAnterior = anio - 1
 
   const categorias = await getCategorias()
-  const [tendencia, resumen, resumenYoY, topComercios, dailySpending, paymentMethods, tcBlue] =
+  const [tendencia, resumen, resumenYoY, topComercios, dailySpending, paymentMethods, tcInfo] =
     await Promise.all([
       getTendencia(6),
       getResumenMes(mes, anio, categorias),
@@ -32,8 +32,9 @@ export default async function AnalyticsPage() {
       getTopComercios(mes, anio, 10),
       getDailySpending(mes, anio),
       getPaymentMethodBreakdown(mes, anio),
-      getLatestTipoCambio('blue'),
+      getTipoCambioActual('oficial'),
     ])
+  const tcBlue = tcInfo?.valor ?? null
 
   const yoyVariacion =
     resumenYoY.total_ars > 0

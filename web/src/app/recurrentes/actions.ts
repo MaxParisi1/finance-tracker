@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
-import { getLatestTipoCambio } from '@/lib/queries'
+import { getTipoCambioActual } from '@/lib/queries'
 import { recurrenteSchema } from '@/lib/validation'
 
 function nextDueDate(diaDelMes: number, frecuencia: string): string {
@@ -42,7 +42,7 @@ export async function materializarRecurrentesAction(): Promise<{
   if (errFetch) throw new Error(errFetch.message)
   if (!recurrentes || recurrentes.length === 0) return { insertados: 0, omitidos: 0, errores: [] }
 
-  const tc_blue = await getLatestTipoCambio('oficial')
+  const tc_blue = (await getTipoCambioActual('oficial'))?.valor ?? null
 
   let insertados = 0
   let omitidos = 0

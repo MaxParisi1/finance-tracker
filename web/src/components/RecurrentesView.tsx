@@ -18,6 +18,8 @@ interface Props {
   total_mensual_ars: number
   total_anual_ars: number
   tc_blue: number | null
+  tc_fecha: string | null
+  tc_es_hoy: boolean
   categorias: string[]
 }
 
@@ -26,6 +28,8 @@ export default function RecurrentesView({
   total_mensual_ars,
   total_anual_ars,
   tc_blue,
+  tc_fecha,
+  tc_es_hoy,
   categorias,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
@@ -80,7 +84,14 @@ export default function RecurrentesView({
             <p className="text-2xl font-bold text-gray-900 mt-1">
               USD {Math.round(total_mensual_ars / tc_blue).toLocaleString('es-AR')}
             </p>
-            <p className="text-xs text-gray-400 mt-0.5">TC oficial ${tc_blue.toLocaleString('es-AR')}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              TC oficial ${tc_blue.toLocaleString('es-AR')}
+              {tc_fecha && (
+                <span className={tc_es_hoy ? 'text-emerald-500' : 'text-amber-500'}>
+                  {' '}· {tc_es_hoy ? 'hoy' : tc_fecha}
+                </span>
+              )}
+            </p>
           </div>
         )}
       </div>
@@ -213,7 +224,7 @@ export default function RecurrentesView({
                 )
               })}
               <p className="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">
-                Los montos en USD se convierten al TC blue más reciente.
+                Los montos en USD se convierten al TC oficial más reciente.
               </p>
             </div>
           )}

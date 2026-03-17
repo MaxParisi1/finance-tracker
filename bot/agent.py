@@ -13,6 +13,17 @@ from datetime import date
 from google import genai
 from google.genai import types
 
+# Cliente singleton — se crea una vez al importar el módulo
+_gemini_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    return _gemini_client
+
+
 from bot.tools.gastos import (
     guardar_gasto,
     guardar_multiples_gastos,
@@ -422,7 +433,7 @@ def run_agent(
     global _chat_id_activo
     _chat_id_activo = chat_id
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    client = _get_client()
 
     config = types.GenerateContentConfig(
         system_instruction=_build_system_prompt(),

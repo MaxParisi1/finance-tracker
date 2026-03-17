@@ -17,8 +17,14 @@ logger = logging.getLogger(__name__)
 MODEL = "gemini-2.5-flash"
 
 
+_gemini_client: genai.Client | None = None
+
+
 def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    return _gemini_client
 
 
 def _limpiar_json(text: str) -> str:

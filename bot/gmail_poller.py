@@ -12,17 +12,26 @@ from google import genai
 from google.genai import types
 
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read
+
+_gemini_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    return _gemini_client
 from bot.tools.gastos import guardar_gasto
 from bot.db.queries import obtener_categorias_activas
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 300  # 5 minutos
+POLL_INTERVAL = 900  # 15 minutos
 
 
 def _parse_email_with_gemini(email: dict) -> dict | None:
     """Usa Gemini para extraer datos de transacción de un email bancario."""
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    client = _get_client()
 
     categorias = [c["nombre"] for c in obtener_categorias_activas()]
     categorias_str = ", ".join(categorias) if categorias else "otros"

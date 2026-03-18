@@ -37,6 +37,7 @@ from bot.tools.gastos import (
     tendencia_gastos,
     top_comercios,
     proyeccion_mensual,
+    historial_comercio,
 )
 from bot.tools.tipo_cambio import obtener_tipo_cambio
 from bot.tools.bbva_parser import importar_pdf_bbva, guardar_movimientos_bbva
@@ -333,6 +334,21 @@ _TOOL_DECLARATIONS = [
         ),
         parameters=types.Schema(type="OBJECT", properties={}),
     ),
+
+    types.FunctionDeclaration(
+        name="historial_comercio",
+        description=(
+            "Busca gastos previos del mismo comercio y devuelve la categoría y medio de pago más frecuentes. "
+            "Llamar cuando el usuario menciona un comercio específico para auto-categorizar sin preguntar."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "comercio": types.Schema(type="STRING", description="Nombre del comercio a buscar"),
+            },
+            required=["comercio"],
+        ),
+    ),
 ]
 
 TOOLS = types.Tool(function_declarations=_TOOL_DECLARATIONS)
@@ -380,6 +396,8 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
             resultado = _previsualizar_pdf_bbva()
         elif nombre == "confirmar_importacion_pdf_bbva":
             resultado = _confirmar_importacion_pdf_bbva()
+        elif nombre == "historial_comercio":
+            resultado = historial_comercio(**args)
         else:
             resultado = {"error": f"Función desconocida: {nombre}"}
     except Exception as e:
@@ -406,8 +424,10 @@ REGLAS FUNDAMENTALES:
 4. Si el usuario corrige algo en su respuesta, actualizar los datos y volver a pedir confirmación.
 5. Usás el tipo de cambio **oficial** por defecto para conversiones de USD a ARS, salvo que el usuario indique otro.
 6. Siempre informás el tipo de cambio usado cuando guardás un gasto en USD.
-7. Para categorías, primero consultás las disponibles en la DB. Solo creás una nueva si ninguna aplica.
-   Si no podés asignar con suficiente confianza, preguntás al usuario.
+7. Para categorías y medio de pago: si el usuario menciona un comercio específico, primero llamá
+   `historial_comercio` para ver si hay gastos previos. Si hay historial, usá la categoría y medio
+   de pago más frecuentes directamente, sin preguntar. Si no hay historial, consultá las categorías
+   disponibles e inferí por contexto. Solo preguntás si realmente no podés determinarlo.
 8. Las consultas y análisis responden con números concretos, no evasivas.
 9. Sos conciso en las respuestas del día a día, más detallado en análisis financieros.
 """

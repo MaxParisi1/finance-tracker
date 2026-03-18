@@ -423,6 +423,31 @@ def top_comercios(mes: int | None = None, anio: int | None = None, limite: int =
     }
 
 
+def historial_comercio(comercio: str) -> dict:
+    """
+    Busca gastos previos del mismo comercio y devuelve la categoría y medio de pago más frecuentes.
+    Útil para auto-categorizar sin preguntarle al usuario.
+    """
+    from collections import Counter
+
+    gastos = queries.obtener_gastos({"busqueda": comercio})
+
+    if not gastos:
+        return {"encontrado": False, "comercio": comercio}
+
+    categorias = Counter(g["categoria"] for g in gastos if g.get("categoria"))
+    medios = Counter(g["medio_pago"] for g in gastos if g.get("medio_pago"))
+
+    return {
+        "encontrado": True,
+        "comercio": comercio,
+        "cantidad_gastos": len(gastos),
+        "categoria_mas_frecuente": categorias.most_common(1)[0][0] if categorias else None,
+        "medio_pago_mas_frecuente": medios.most_common(1)[0][0] if medios else None,
+        "ultimo_gasto": gastos[0].get("fecha") if gastos else None,
+    }
+
+
 def proyeccion_mensual() -> dict:
     """
     Proyecta el gasto total del mes actual basándose en el ritmo de los días transcurridos.

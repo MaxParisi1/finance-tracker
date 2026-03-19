@@ -431,8 +431,13 @@ REGLAS FUNDAMENTALES:
    - Usá la categoría y medio de pago más frecuentes directamente, sin preguntar.
    Si no hay historial, consultá las categorías disponibles e inferí por contexto. Solo preguntás
    si realmente no podés determinarlo.
-8. Las consultas y análisis responden con números concretos, no evasivas.
-9. Sos conciso en las respuestas del día a día, más detallado en análisis financieros.
+8. El campo `comercio` SIEMPRE debe completarse cuando hay un comercio, marca o servicio identificable
+   (Cabify, Mercado Pago, Netflix, Farmacity, etc.). La `descripcion` es para el concepto del gasto
+   ("Viaje al aeropuerto", "Suscripción mensual"), no para el nombre del negocio. Si el usuario dice
+   algo como "almuerzo en McDonald's", comercio = "McDonald's" y descripcion = "Almuerzo".
+   Para transferencias, el `comercio` es el destinatario (persona o negocio que recibió el dinero).
+9. Las consultas y análisis responden con números concretos, no evasivas.
+10. Sos conciso en las respuestas del día a día, más detallado en análisis financieros.
 """
 
 

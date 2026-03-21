@@ -65,3 +65,20 @@ export interface TendenciaMes {
   cantidad: number
   variacion_pct: number | null
 }
+
+export interface ArchivoDrive {
+  id: string
+  gasto_id: string | null
+  tipo: string
+  comercio: string | null
+  fecha: string
+  categoria: string | null
+  monto: number | null
+  moneda: string | null
+  drive_file_id: string
+  drive_file_name: string
+  drive_web_view_link: string | null
+  drive_folder_path: string | null
+  mime_type: string | null
+  created_at: string
+}

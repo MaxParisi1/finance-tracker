@@ -1,5 +1,5 @@
 import { getSupabaseServer } from './supabase'
-import type { Gasto, GastoRecurrente, Categoria, MensualResumen, TendenciaMes } from './types'
+import type { Gasto, GastoRecurrente, Categoria, MensualResumen, TendenciaMes, ArchivoDrive } from './types'
 import { monthLabel } from './utils'
 
 // ──────────────────────────────────────────────
@@ -443,4 +443,70 @@ export async function getRecurrentesConCosto(): Promise<{
     tc_fecha: tcInfo?.fecha ?? null,
     tc_es_hoy: tcInfo?.esHoy ?? false,
   }
+}
+
+// ──────────────────────────────────────────────
+// Archivos Drive (comprobantes/facturas)
+// ──────────────────────────────────────────────
+
+export async function getArchivosDrive(filtros?: {
+  mes?: number
+  anio?: number
+  comercio?: string
+  categoria?: string
+  tipo?: string
+}): Promise<ArchivoDrive[]> {
+  const supabase = getSupabaseServer()
+  let q = supabase.from('archivos_drive').select('*')
+
+  if (filtros?.mes && filtros?.anio) {
+    const { desde, hasta } = monthRange(filtros.mes, filtros.anio)
+    q = q.gte('fecha', desde).lt('fecha', hasta)
+  } else if (filtros?.anio) {
+    q = q.gte('fecha', `${filtros.anio}-01-01`).lt('fecha', `${filtros.anio + 1}-01-01`)
+  }
+
+  if (filtros?.comercio) {
+    q = q.ilike('comercio', `%${filtros.comercio}%`)
+  }
+  if (filtros?.categoria) {
+    q = q.eq('categoria', filtros.categoria)
+  }
+  if (filtros?.tipo) {
+    q = q.eq('tipo', filtros.tipo)
+  }
+
+  const { data, error } = await q.order('fecha', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function getArchivosPorGasto(gastoId: string): Promise<ArchivoDrive[]> {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('archivos_drive')
+    .select('*')
+    .eq('gasto_id', gastoId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data ?? []
+}
+
+export async function contarArchivosPorGastos(gastoIds: string[]): Promise<Record<string, number>> {
+  if (gastoIds.length === 0) return {}
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('archivos_drive')
+    .select('gasto_id')
+    .in('gasto_id', gastoIds)
+
+  if (error) throw error
+  const counts: Record<string, number> = {}
+  for (const row of data ?? []) {
+    if (row.gasto_id) {
+      counts[row.gasto_id] = (counts[row.gasto_id] ?? 0) + 1
+    }
+  }
+  return counts
 }

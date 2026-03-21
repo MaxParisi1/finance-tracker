@@ -9,9 +9,10 @@ import { formatARS } from '@/lib/utils'
 interface Props {
   gastos: Gasto[]
   categorias: string[]
+  archivoCounts?: Record<string, number>
 }
 
-export default function GastosTableView({ gastos, categorias }: Props) {
+export default function GastosTableView({ gastos, categorias, archivoCounts }: Props) {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState('')
   const [moneda, setMoneda] = useState('')
@@ -141,7 +142,7 @@ export default function GastosTableView({ gastos, categorias }: Props) {
 
       {/* Tabla */}
       <div className="bg-white rounded-xl border border-gray-200">
-        <ExpenseTable gastos={filtered} onRowClick={setEditing} />
+        <ExpenseTable gastos={filtered} onRowClick={setEditing} archivoCounts={archivoCounts} />
       </div>
 
       {editing && (

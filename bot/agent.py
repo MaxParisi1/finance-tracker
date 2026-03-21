@@ -10,18 +10,10 @@ import json
 import logging
 from datetime import date
 
-from google import genai
 from google.genai import types
 
-# Cliente singleton — se crea una vez al importar el módulo
-_gemini_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    return _gemini_client
+from google import genai
+from bot.gemini_client import get_client as _get_client, create_chat_with_fallback
 
 
 from bot.tools.gastos import (
@@ -41,6 +33,11 @@ from bot.tools.gastos import (
 )
 from bot.tools.tipo_cambio import obtener_tipo_cambio
 from bot.tools.bbva_parser import importar_pdf_bbva, guardar_movimientos_bbva
+from bot.tools.comprobantes import (
+    subir_comprobante_a_drive,
+    vincular_comprobante_a_gasto,
+    buscar_comprobantes,
+)
 from bot.db.queries import obtener_categorias_activas, obtener_gastos
 
 logger = logging.getLogger(__name__)
@@ -349,6 +346,65 @@ _TOOL_DECLARATIONS = [
             required=["comercio"],
         ),
     ),
+
+    # ── Comprobantes / Drive ──────────────────────
+
+    types.FunctionDeclaration(
+        name="subir_comprobante_a_drive",
+        description=(
+            "Sube el comprobante/factura que el usuario acaba de enviar a Google Drive. "
+            "Los bytes del archivo ya están almacenados internamente. "
+            "Los parámetros permiten sobreescribir los datos que Gemini Vision extrajo. "
+            "Llamar SOLO después de mostrar un resumen al usuario y recibir confirmación."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "comercio":  types.Schema(type="STRING", description="Nombre del comercio/emisor"),
+                "fecha":     types.Schema(type="STRING", description="Fecha del documento YYYY-MM-DD"),
+                "tipo":      types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
+                "categoria": types.Schema(type="STRING", description="Categoría: Servicios, Salud, Impuestos u Otros"),
+                "monto":     types.Schema(type="NUMBER", description="Monto si es visible"),
+                "moneda":    types.Schema(type="STRING", enum=["ARS", "USD"]),
+            },
+        ),
+    ),
+
+    types.FunctionDeclaration(
+        name="vincular_comprobante_a_gasto",
+        description=(
+            "Vincula un archivo ya subido a Drive con un gasto existente. "
+            "Útil cuando el usuario sube un comprobante de pago para un gasto ya registrado."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "archivo_id": types.Schema(type="STRING", description="UUID del archivo en archivos_drive"),
+                "gasto_id":   types.Schema(type="STRING", description="UUID del gasto a vincular"),
+            },
+            required=["archivo_id", "gasto_id"],
+        ),
+    ),
+
+    types.FunctionDeclaration(
+        name="buscar_comprobantes",
+        description=(
+            "Busca comprobantes y facturas guardados en Drive. "
+            "Permite filtrar por comercio, mes, año, categoría y tipo."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "comercio":    types.Schema(type="STRING", description="Nombre del comercio a buscar"),
+                "mes":         types.Schema(type="INTEGER", description="Mes (1-12)"),
+                "anio":        types.Schema(type="INTEGER", description="Año"),
+                "categoria":   types.Schema(type="STRING", description="Categoría del comprobante"),
+                "tipo":        types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
+                "fecha_desde": types.Schema(type="STRING", description="Fecha desde YYYY-MM-DD"),
+                "fecha_hasta": types.Schema(type="STRING", description="Fecha hasta YYYY-MM-DD"),
+            },
+        ),
+    ),
 ]
 
 TOOLS = types.Tool(function_declarations=_TOOL_DECLARATIONS)
@@ -398,6 +454,12 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
             resultado = _confirmar_importacion_pdf_bbva()
         elif nombre == "historial_comercio":
             resultado = historial_comercio(**args)
+        elif nombre == "subir_comprobante_a_drive":
+            resultado = subir_comprobante_a_drive(chat_id=_chat_id_activo, **args)
+        elif nombre == "vincular_comprobante_a_gasto":
+            resultado = vincular_comprobante_a_gasto(**args)
+        elif nombre == "buscar_comprobantes":
+            resultado = buscar_comprobantes(**args)
         else:
             resultado = {"error": f"Función desconocida: {nombre}"}
     except Exception as e:
@@ -438,6 +500,20 @@ REGLAS FUNDAMENTALES:
    Para transferencias, el `comercio` es el destinatario (persona o negocio que recibió el dinero).
 9. Las consultas y análisis responden con números concretos, no evasivas.
 10. Sos conciso en las respuestas del día a día, más detallado en análisis financieros.
+
+COMPROBANTES Y FACTURAS (Google Drive):
+11. Cuando el usuario manda una foto o PDF de un comprobante/factura, los datos extraídos se incluyen
+    en el mensaje. Mostrá un resumen al usuario (comercio, fecha, tipo, monto si hay) y preguntá:
+    - "¿Subo este comprobante a Drive?" (si solo quiere guardar el archivo)
+    - "¿Subo a Drive y guardo el gasto también?" (si corresponde crear el gasto)
+    Si el usuario dice "solo guardá esto en drive" o similar, subí sin crear gasto.
+12. Al confirmar subida, llamá `subir_comprobante_a_drive` con los datos. Después de subir exitosamente,
+    mostrá: nombre de archivo, ubicación en Drive y link.
+13. Si el usuario pide buscar un comprobante ("mostrá la factura de Edenor de febrero"),
+    usá `buscar_comprobantes` y devolvé nombre, fecha, monto y link de Drive.
+14. Si al subir un comprobante detectás que hay un gasto del mismo comercio en fechas cercanas,
+    ofrecé vincularlos con `vincular_comprobante_a_gasto`.
+15. Si se detecta un duplicado (mismo comercio, fecha y tipo), informá al usuario y no subas de nuevo.
 """
 
 
@@ -461,8 +537,6 @@ def run_agent(
     global _chat_id_activo
     _chat_id_activo = chat_id
 
-    client = _get_client()
-
     config = types.GenerateContentConfig(
         system_instruction=_build_system_prompt(),
         tools=[TOOLS],
@@ -475,9 +549,18 @@ def run_agent(
             types.Content(role=turn["role"], parts=[types.Part(text=p) for p in turn["parts"]])
         )
 
-    chat = client.chats.create(model=MODEL, config=config, history=gemini_history)
+    chat = create_chat_with_fallback(model=MODEL, config=config, history=gemini_history)
 
-    response = chat.send_message(user_message)
+    try:
+        response = chat.send_message(user_message)
+    except genai.errors.ClientError as e:
+        if e.code == 429:
+            chat = create_chat_with_fallback(
+                model=MODEL, config=config, history=gemini_history, force_paid=True
+            )
+            response = chat.send_message(user_message)
+        else:
+            raise
 
     for _ in range(MAX_ITER):
         if not response.candidates or not response.candidates[0].content.parts:
@@ -503,9 +586,21 @@ def run_agent(
                 )
             )
 
-        response = chat.send_message(function_response_parts)
+        try:
+            response = chat.send_message(function_response_parts)
+        except genai.errors.ClientError as e:
+            if e.code == 429:
+                chat = create_chat_with_fallback(
+                    model=MODEL, config=config, history=gemini_history, force_paid=True
+                )
+                response = chat.send_message(function_response_parts)
+            else:
+                raise
 
     try:
-        return response.text
+        text = response.text
+        if not text or not text.strip():
+            return "Procesé tu solicitud pero no generé una respuesta. ¿Necesitás algo más?"
+        return text
     except Exception:
         return "Lo siento, no pude procesar tu mensaje. Intentá de nuevo."

@@ -16,6 +16,7 @@ import {
   getCategorias,
   getTipoCambioActual,
   getRecurrentesConCosto,
+  getArchivosDrive,
 } from '@/lib/queries'
 import { getSupabaseServer } from '@/lib/supabase'
 
@@ -142,6 +143,20 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     parameters: { type: SchemaType.OBJECT, properties: {} },
   },
   {
+    name: 'buscar_comprobantes',
+    description: 'Busca comprobantes y facturas guardados en Google Drive. Permite filtrar por comercio, mes, año, categoría y tipo.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        comercio:  { type: SchemaType.STRING, description: 'Nombre del comercio a buscar' },
+        mes:       { type: SchemaType.INTEGER, description: 'Mes (1-12)' },
+        anio:      { type: SchemaType.INTEGER, description: 'Año' },
+        categoria: { type: SchemaType.STRING, description: 'Categoría del comprobante' },
+        tipo:      { type: SchemaType.STRING, description: 'factura, comprobante, ticket, recibo o resumen' },
+      },
+    },
+  },
+  {
     name: 'guardar_gasto',
     description:
       'Guarda un gasto en la base de datos. ' +
@@ -245,6 +260,30 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
 
       case 'obtener_categorias': {
         resultado = await getCategorias()
+        break
+      }
+
+      case 'buscar_comprobantes': {
+        const filtros: { mes?: number; anio?: number; comercio?: string; categoria?: string; tipo?: string } = {}
+        if (args.mes) filtros.mes = args.mes
+        if (args.anio) filtros.anio = args.anio
+        if (args.comercio) filtros.comercio = args.comercio
+        if (args.categoria) filtros.categoria = args.categoria
+        if (args.tipo) filtros.tipo = args.tipo
+        const archivos = await getArchivosDrive(filtros)
+        resultado = {
+          cantidad: archivos.length,
+          archivos: archivos.slice(0, 20).map(a => ({
+            nombre: a.drive_file_name,
+            comercio: a.comercio,
+            fecha: a.fecha,
+            tipo: a.tipo,
+            monto: a.monto,
+            moneda: a.moneda,
+            link: a.drive_web_view_link,
+            gasto_vinculado: !!a.gasto_id,
+          })),
+        }
         break
       }
 

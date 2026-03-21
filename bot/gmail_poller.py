@@ -8,19 +8,10 @@ import json
 import logging
 import os
 
-from google import genai
 from google.genai import types
 
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read
-
-_gemini_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    return _gemini_client
+from bot.gemini_client import generate_with_fallback
 from bot.tools.gastos import guardar_gasto
 from bot.db.queries import obtener_categorias_activas
 
@@ -31,8 +22,6 @@ POLL_INTERVAL = 900  # 15 minutos
 
 def _parse_email_with_gemini(email: dict) -> dict | None:
     """Usa Gemini para extraer datos de transacción de un email bancario."""
-    client = _get_client()
-
     categorias = [c["nombre"] for c in obtener_categorias_activas()]
     categorias_str = ", ".join(categorias) if categorias else "otros"
 
@@ -65,7 +54,7 @@ Cuerpo:
 {email['body'][:2000]}
 """
 
-    response = client.models.generate_content(
+    response = generate_with_fallback(
         model="gemini-2.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(response_mime_type="application/json"),

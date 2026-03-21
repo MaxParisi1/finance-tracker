@@ -2,7 +2,7 @@ import Sidebar from '@/components/Sidebar'
 import GastosFilter from '@/components/GastosFilter'
 import GastosTableView from '@/components/GastosTableView'
 import GlobalSearchInput from '@/components/GlobalSearchInput'
-import { getGastosMes, searchGastos, getCategorias } from '@/lib/queries'
+import { getGastosMes, searchGastos, getCategorias, contarArchivosPorGastos } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +23,10 @@ export default async function GastosPage({
     isSearching ? searchGastos(q) : getGastosMes(mes, anio),
     getCategorias(),
   ])
+
+  // Contar archivos vinculados a los gastos de este período
+  const gastoIds = gastos.map(g => g.id)
+  const archivoCounts = await contarArchivosPorGastos(gastoIds)
 
   const totalARS = gastos.reduce((sum, g) => sum + (g.monto_ars ?? 0), 0)
 
@@ -49,7 +53,7 @@ export default async function GastosPage({
           </div>
 
           {/* Tabla con search, filtros y export CSV */}
-          <GastosTableView gastos={gastos} categorias={categorias.map(c => c.nombre)} />
+          <GastosTableView gastos={gastos} categorias={categorias.map(c => c.nombre)} archivoCounts={archivoCounts} />
         </div>
       </main>
     </div>

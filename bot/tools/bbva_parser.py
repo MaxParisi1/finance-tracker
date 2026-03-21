@@ -79,13 +79,11 @@ def _texto_es_usable(texto: str) -> bool:
 
 def _parsear_con_texto(texto: str) -> list[dict]:
     """Llama a Gemini con el texto extraído y devuelve los movimientos."""
-    from google import genai
-    from google.genai import types
+    from bot.gemini_client import generate_with_fallback
 
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
     contenido = f"{_PROMPT_BBVA}\n\nTexto del resumen:\n{texto}"
 
-    response = client.models.generate_content(
+    response = generate_with_fallback(
         model=MODEL,
         contents=contenido,
     )
@@ -105,12 +103,10 @@ def _parsear_con_vision(pdf_bytes: bytes) -> list[dict]:
     Convierte cada página del PDF a imagen y usa Gemini Vision para extraer datos.
     Combina resultados de todas las páginas.
     """
-    from google import genai
     from google.genai import types
     from pdf2image import convert_from_bytes
     from PIL import Image
-
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    from bot.gemini_client import generate_with_fallback
 
     # Convertir PDF a imágenes (DPI 150 es suficiente para texto)
     imagenes = convert_from_bytes(pdf_bytes, dpi=150)
@@ -124,7 +120,7 @@ def _parsear_con_vision(pdf_bytes: bytes) -> list[dict]:
         imagen.save(buffer, format="JPEG", quality=85)
         img_bytes = buffer.getvalue()
 
-        response = client.models.generate_content(
+        response = generate_with_fallback(
             model=MODEL,
             contents=[
                 types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),

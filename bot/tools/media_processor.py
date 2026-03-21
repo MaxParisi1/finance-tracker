@@ -5,26 +5,16 @@ Estas funciones son llamadas directamente desde main.py (no como tools del agent
 El resultado se inyecta en el mensaje al agente para que arranque el flujo de confirmación.
 """
 
-import os
 import json
 import re
 import logging
-from google import genai
 from google.genai import types
+
+from bot.gemini_client import generate_with_fallback
 
 logger = logging.getLogger(__name__)
 
 MODEL = "gemini-2.5-flash"
-
-
-_gemini_client: genai.Client | None = None
-
-
-def _get_client() -> genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-    return _gemini_client
 
 
 def _limpiar_json(text: str) -> str:
@@ -82,9 +72,7 @@ def procesar_imagen_ticket(imagen_bytes: bytes, mime_type: str = "image/jpeg") -
         Dict con: comercio, fecha, monto_total, moneda, items, notas.
         Campos no visibles vienen como None.
     """
-    client = _get_client()
-
-    response = client.models.generate_content(
+    response = generate_with_fallback(
         model=MODEL,
         contents=[
             types.Part.from_bytes(data=imagen_bytes, mime_type=mime_type),
@@ -140,9 +128,7 @@ def procesar_audio(audio_bytes: bytes, mime_type: str = "audio/ogg") -> dict:
     Returns:
         Dict con: transcripcion, tiene_gasto, descripcion, monto, moneda, medio_pago, fecha, notas.
     """
-    client = _get_client()
-
-    response = client.models.generate_content(
+    response = generate_with_fallback(
         model=MODEL,
         contents=[
             types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
@@ -190,6 +176,91 @@ def ticket_a_mensaje(datos: dict) -> str:
         partes.append(f"- Notas: {datos['notas']}")
 
     partes.append("\nUsá estos datos para proponer el gasto al usuario siguiendo el flujo normal de confirmación.")
+    return "\n".join(partes)
+
+
+# ──────────────────────────────────────────────
+# Análisis de comprobantes/facturas para Drive
+# ──────────────────────────────────────────────
+
+_PROMPT_COMPROBANTE = """
+Sos un asistente que analiza comprobantes y facturas argentinas.
+
+Analizá esta imagen/PDF y extraé la siguiente información en formato JSON:
+
+{
+  "tipo": "factura" | "comprobante" | "ticket" | "recibo" | "resumen",
+  "comercio": "nombre del emisor o comercio",
+  "fecha": "YYYY-MM-DD",
+  "monto": número (si está visible, o null),
+  "moneda": "ARS" | "USD" | null,
+  "categoria_sugerida": "Servicios" | "Salud" | "Impuestos" | "Otros",
+  "descripcion": "breve descripción de qué es (ej: 'Factura de luz', 'Cuota obra social')"
+}
+
+Reglas:
+- Para "tipo": si dice "FACTURA" es factura, si dice "COMPROBANTE DE PAGO" es comprobante, si es un ticket de compra es ticket.
+- Para "comercio": normalizar el nombre legible (ej: "EDENOR S.A." → "Edenor", "O.S.D.E." → "OSDE").
+- Para "categoria_sugerida": Servicios para luz/gas/internet/expensas/teléfono, Salud para médicos/obras sociales/farmacias, Impuestos para AFIP/monotributo/impuestos, Otros para el resto.
+- IMPORTANTE — Formato numérico argentino: punto (.) es miles, coma (,) es decimal. $10.600 = 10600, $1.250,50 = 1250.50. Siempre convertí a float sin separadores de miles.
+- Si no podés extraer algún campo, usá null.
+- La fecha es la de emisión del comprobante, NO la de vencimiento.
+
+Respondé SOLO con el JSON, sin texto adicional.
+"""
+
+
+def analizar_comprobante(archivo_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """
+    Analiza un comprobante/factura con Gemini Vision para extraer datos estructurados.
+    Se usa tanto para fotos como para PDFs de comprobantes.
+    """
+    response = generate_with_fallback(
+        model=MODEL,
+        contents=[
+            types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+            types.Part(text=_PROMPT_COMPROBANTE),
+        ],
+    )
+
+    try:
+        data = json.loads(_limpiar_json(response.text))
+    except json.JSONDecodeError:
+        logger.warning(f"Gemini Vision devolvió JSON inválido para comprobante: {response.text[:300]}")
+        data = {"error": "No pude extraer datos estructurados del comprobante."}
+
+    return data
+
+
+def comprobante_a_mensaje(datos: dict) -> str:
+    """
+    Convierte el resultado de analizar_comprobante en un mensaje interno para el agente.
+    """
+    if "error" in datos:
+        return (
+            f"El usuario mandó un comprobante/factura pero no pude extraer los datos: {datos['error']}. "
+            "Pedile al usuario que confirme manualmente: comercio, fecha y tipo de documento."
+        )
+
+    partes = ["El usuario mandó un comprobante/factura para subir a Drive. Datos extraídos:"]
+    if datos.get("tipo"):
+        partes.append(f"- Tipo: {datos['tipo']}")
+    if datos.get("comercio"):
+        partes.append(f"- Comercio/Emisor: {datos['comercio']}")
+    if datos.get("fecha"):
+        partes.append(f"- Fecha: {datos['fecha']}")
+    if datos.get("monto") is not None:
+        partes.append(f"- Monto: {datos['monto']} {datos.get('moneda') or 'ARS'}")
+    if datos.get("categoria_sugerida"):
+        partes.append(f"- Categoría sugerida: {datos['categoria_sugerida']}")
+    if datos.get("descripcion"):
+        partes.append(f"- Descripción: {datos['descripcion']}")
+
+    partes.append(
+        "\nEl archivo está listo para subir. Mostrá el resumen al usuario y preguntá si quiere "
+        "subirlo a Drive (y opcionalmente guardar el gasto también). "
+        "Si confirma la subida, llamá a subir_comprobante_a_drive con los datos."
+    )
     return "\n".join(partes)
 
 

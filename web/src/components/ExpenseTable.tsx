@@ -7,9 +7,10 @@ interface ExpenseTableProps {
   gastos: Gasto[]
   compact?: boolean
   onRowClick?: (gasto: Gasto) => void
+  archivoCounts?: Record<string, number>
 }
 
-export default function ExpenseTable({ gastos, compact = false, onRowClick }: ExpenseTableProps) {
+export default function ExpenseTable({ gastos, compact = false, onRowClick, archivoCounts }: ExpenseTableProps) {
   if (gastos.length === 0) {
     return (
       <div className="text-center py-12 text-gray-400 text-sm">
@@ -53,17 +54,30 @@ export default function ExpenseTable({ gastos, compact = false, onRowClick }: Ex
                 {formatDate(g.fecha)}
               </td>
               <td className="py-3 px-4">
-                <span className="text-gray-900">{g.descripcion}</span>
-                {g.cuotas > 1 && (
-                  <span className="ml-2 text-xs text-gray-400">
-                    ({g.cuota_actual}/{g.cuotas})
-                  </span>
-                )}
-                {g.moneda === 'USD' && (
-                  <span className="ml-2 text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
-                    USD
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-900">{g.descripcion}</span>
+                  {g.cuotas > 1 && (
+                    <span className="text-xs text-gray-400">
+                      ({g.cuota_actual}/{g.cuotas})
+                    </span>
+                  )}
+                  {g.moneda === 'USD' && (
+                    <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
+                      USD
+                    </span>
+                  )}
+                  {archivoCounts && archivoCounts[g.id] > 0 && (
+                    <span
+                      className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                      title={`${archivoCounts[g.id]} archivo(s) en Drive`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                        <path fillRule="evenodd" d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.414A2 2 0 0 0 13.414 6L10 2.586A2 2 0 0 0 8.586 2H4Zm6 5.5a.5.5 0 1 0-1 0V9H7.5a.5.5 0 0 0 0 1H9v1.5a.5.5 0 1 0 1 0V10h1.5a.5.5 0 1 0 0-1H10V7.5Z" clipRule="evenodd" />
+                      </svg>
+                      {archivoCounts[g.id]}
+                    </span>
+                  )}
+                </div>
               </td>
               <td className="py-3 px-4">
                 <span className="text-gray-600">{g.categoria ?? '—'}</span>

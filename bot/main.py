@@ -23,9 +23,12 @@ from bot.gmail_poller import start_gmail_polling
 from bot.tools.media_processor import (
     procesar_imagen_ticket,
     procesar_audio,
+    analizar_comprobante,
     ticket_a_mensaje,
     audio_a_mensaje,
+    comprobante_a_mensaje,
 )
+from bot.tools.comprobantes import set_archivo_pendiente
 from bot.tools.bbva_parser import importar_pdf_bbva
 from bot.db.queries import obtener_gastos, cargar_historial_bot, guardar_historial_bot
 
@@ -148,8 +151,20 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await safe_reply(update.message, response)
 
 
+def _is_comprobante_request(caption: str | None) -> bool:
+    """Detecta si el caption indica que el usuario quiere subir a Drive."""
+    if not caption:
+        return False
+    keywords = [
+        "drive", "comprobante", "factura", "guardá", "guarda",
+        "subí", "subi", "organiz", "archiv",
+    ]
+    lower = caption.lower()
+    return any(kw in lower for kw in keywords)
+
+
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa fotos de tickets con Gemini Vision."""
+    """Procesa fotos de tickets/comprobantes con Gemini Vision."""
     if not _is_authorized(update):
         return
 
@@ -160,11 +175,39 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     photo = update.message.photo[-1]
     file = await context.bot.get_file(photo.file_id)
     img_bytes = await file.download_as_bytearray()
+    caption = update.message.caption or ""
+
+    # Decidir flujo: si el caption pide Drive, o si parece factura/comprobante
+    is_drive_request = _is_comprobante_request(caption)
 
     try:
-        datos = procesar_imagen_ticket(bytes(img_bytes))
-        mensaje_interno = ticket_a_mensaje(datos)
-    except Exception as e:
+        if is_drive_request:
+            # Flujo comprobante → analizar para Drive
+            datos = analizar_comprobante(bytes(img_bytes), mime_type="image/jpeg")
+            set_archivo_pendiente(chat_id, bytes(img_bytes), "image/jpeg", datos)
+            mensaje_interno = comprobante_a_mensaje(datos)
+            if caption:
+                mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
+        else:
+            # Flujo ticket/gasto normal
+            datos = procesar_imagen_ticket(bytes(img_bytes))
+            # Siempre almacenar por si el usuario quiere subirlo después
+            datos_comprobante = {
+                "tipo": datos.get("tipo", "ticket"),
+                "comercio": datos.get("comercio"),
+                "fecha": datos.get("fecha"),
+                "monto": datos.get("monto_total"),
+                "moneda": datos.get("moneda", "ARS"),
+                "categoria_sugerida": "Otros",
+            }
+            set_archivo_pendiente(chat_id, bytes(img_bytes), "image/jpeg", datos_comprobante)
+            mensaje_interno = ticket_a_mensaje(datos)
+            mensaje_interno += (
+                "\n\nAdemás, el archivo está disponible para subir a Google Drive si el usuario lo pide."
+            )
+            if caption:
+                mensaje_interno += f"\nEl usuario también dijo: \"{caption}\""
+    except Exception:
         logger.exception("Error procesando imagen")
         await update.message.reply_text("No pude procesar la imagen. Intentá de nuevo o describí el gasto en texto.")
         return
@@ -176,7 +219,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.exception("Error en el agente (foto)")
         response = "Uy, algo salió mal procesando la foto."
 
-    _add_to_history(chat_id, "user", "[foto de ticket]")
+    _add_to_history(chat_id, "user", f"[foto]{f' {caption}' if caption else ''}")
     _add_to_history(chat_id, "model", response)
 
     await safe_reply(update.message, response)
@@ -218,69 +261,109 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await safe_reply(update.message, response)
 
 
+def _is_bbva_pdf(filename: str | None, caption: str | None) -> bool:
+    """Heurística para detectar si un PDF es un resumen BBVA."""
+    if caption:
+        lower = caption.lower()
+        if "bbva" in lower or "resumen" in lower:
+            return True
+    if filename:
+        lower = filename.lower()
+        if "bbva" in lower or "resumen" in lower:
+            return True
+    return False
+
+
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa PDFs del resumen BBVA."""
+    """Procesa PDFs: resúmenes BBVA o comprobantes/facturas para Drive."""
     if not _is_authorized(update):
         return
 
     doc = update.message.document
     chat_id = update.effective_chat.id
+    caption = update.message.caption or ""
+    mime_type = doc.mime_type or ""
 
-    # Solo aceptar PDFs
-    if doc.mime_type != "application/pdf":
-        await update.message.reply_text("Solo proceso archivos PDF (resúmenes BBVA). Para otros archivos, describí el gasto en texto.")
+    # Aceptar PDFs e imágenes como documentos
+    accepted_types = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+    if mime_type not in accepted_types:
+        await update.message.reply_text(
+            "Puedo procesar PDFs e imágenes (facturas, comprobantes, resúmenes BBVA). "
+            "Para otros archivos, describí el gasto en texto."
+        )
         return
 
     await context.bot.send_chat_action(chat_id=chat_id, action="upload_document")
-    await update.message.reply_text("Recibí el PDF, lo estoy procesando... un momento.")
 
     file = await context.bot.get_file(doc.file_id)
-    pdf_bytes = await file.download_as_bytearray()
+    file_bytes = await file.download_as_bytearray()
 
-    try:
-        # Traer gastos recientes para detección de duplicados (últimos 90 días)
-        from datetime import date, timedelta
-        fecha_desde = (date.today() - timedelta(days=90)).isoformat()
-        gastos_existentes = obtener_gastos({"fecha_desde": fecha_desde})
+    # Decidir flujo: BBVA o comprobante general
+    is_bbva = mime_type == "application/pdf" and _is_bbva_pdf(doc.file_name, caption)
+    is_drive_request = _is_comprobante_request(caption)
 
-        resultado = importar_pdf_bbva(bytes(pdf_bytes), gastos_existentes)
-        set_pdf_pendiente(chat_id, resultado, bytes(pdf_bytes))
+    if is_bbva and not is_drive_request:
+        # ── Flujo BBVA (existente) ──
+        await update.message.reply_text("Recibí el PDF, lo estoy procesando... un momento.")
 
-    except Exception:
-        logger.exception("Error procesando PDF BBVA")
-        await update.message.reply_text("No pude procesar el PDF. ¿Es un resumen BBVA? Intentá de nuevo.")
-        return
+        try:
+            from datetime import date, timedelta
+            fecha_desde = (date.today() - timedelta(days=90)).isoformat()
+            gastos_existentes = obtener_gastos({"fecha_desde": fecha_desde})
+            resultado = importar_pdf_bbva(bytes(file_bytes), gastos_existentes)
+            set_pdf_pendiente(chat_id, resultado, bytes(file_bytes))
+        except Exception:
+            logger.exception("Error procesando PDF BBVA")
+            await update.message.reply_text("No pude procesar el PDF. ¿Es un resumen BBVA? Intentá de nuevo.")
+            return
 
-    # Construir mensaje interno para el agente con el resumen
-    nuevos = resultado["total_nuevos"]
-    duplicados = resultado["total_duplicados"]
-    fecha_desde_pdf = resultado.get("fecha_desde") or "?"
-    fecha_hasta_pdf = resultado.get("fecha_hasta") or "?"
-    metodo = resultado.get("metodo_usado", "texto")
+        nuevos = resultado["total_nuevos"]
+        duplicados = resultado["total_duplicados"]
+        fecha_desde_pdf = resultado.get("fecha_desde") or "?"
+        fecha_hasta_pdf = resultado.get("fecha_hasta") or "?"
+        metodo = resultado.get("metodo_usado", "texto")
 
-    muestra = resultado["movimientos_nuevos"][:5]
-    muestra_txt = "\n".join(
-        f"  • {m.get('fecha', '?')} | {m.get('descripcion', '?')} | ${m.get('monto', 0):,.2f} {m.get('moneda', 'ARS')}"
-        for m in muestra
-    )
+        muestra = resultado["movimientos_nuevos"][:5]
+        muestra_txt = "\n".join(
+            f"  • {m.get('fecha', '?')} | {m.get('descripcion', '?')} | ${m.get('monto', 0):,.2f} {m.get('moneda', 'ARS')}"
+            for m in muestra
+        )
 
-    mensaje_interno = (
-        f"El usuario mandó un PDF de resumen BBVA. Ya fue procesado (método: {metodo}).\n"
-        f"Encontré {nuevos + duplicados} movimientos entre {fecha_desde_pdf} y {fecha_hasta_pdf}.\n"
-        f"Nuevos para importar: {nuevos}. Duplicados detectados (se omitirán): {duplicados}.\n\n"
-        f"Primeros movimientos nuevos:\n{muestra_txt}\n\n"
-        f"Mostrá este resumen al usuario y pedí confirmación explícita para importar. "
-        f"Si confirma, llamá a confirmar_importacion_pdf_bbva."
-    )
+        mensaje_interno = (
+            f"El usuario mandó un PDF de resumen BBVA. Ya fue procesado (método: {metodo}).\n"
+            f"Encontré {nuevos + duplicados} movimientos entre {fecha_desde_pdf} y {fecha_hasta_pdf}.\n"
+            f"Nuevos para importar: {nuevos}. Duplicados detectados (se omitirán): {duplicados}.\n\n"
+            f"Primeros movimientos nuevos:\n{muestra_txt}\n\n"
+            f"Mostrá este resumen al usuario y pedí confirmación explícita para importar. "
+            f"Si confirma, llamá a confirmar_importacion_pdf_bbva."
+        )
+        history_label = "[PDF resumen BBVA]"
+
+    else:
+        # ── Flujo comprobante/factura para Drive ──
+        await update.message.reply_text("Recibí el archivo, analizándolo... un momento.")
+
+        try:
+            datos = analizar_comprobante(bytes(file_bytes), mime_type=mime_type)
+            set_archivo_pendiente(chat_id, bytes(file_bytes), mime_type, datos)
+            mensaje_interno = comprobante_a_mensaje(datos)
+            if caption:
+                mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
+        except Exception:
+            logger.exception("Error analizando comprobante")
+            await update.message.reply_text("No pude analizar el archivo. Intentá de nuevo.")
+            return
+
+        history_label = f"[documento: {doc.file_name or 'archivo'}]"
 
     history = _get_history(chat_id)
     try:
         response = run_agent(mensaje_interno, history, chat_id=chat_id)
     except Exception:
-        logger.exception("Error en el agente (PDF)")
-        response = "Uy, algo salió mal mostrando el resumen del PDF."
+        logger.exception("Error en el agente (documento)")
+        response = "Uy, algo salió mal procesando el archivo."
 
-    _add_to_history(chat_id, "user", "[PDF resumen BBVA]")
+    _add_to_history(chat_id, "user", history_label)
     _add_to_history(chat_id, "model", response)
 
     await safe_reply(update.message, response)

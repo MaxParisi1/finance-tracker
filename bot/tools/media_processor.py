@@ -200,11 +200,11 @@ Analizá esta imagen/PDF y extraé la siguiente información en formato JSON:
 
 Reglas:
 - Para "tipo": si dice "FACTURA" es factura, si dice "COMPROBANTE DE PAGO" es comprobante, si es un ticket de compra es ticket.
-- Para "comercio": normalizar el nombre legible (ej: "EDENOR S.A." → "Edenor", "O.S.D.E." → "OSDE").
-- Para "categoria_sugerida": Servicios para luz/gas/internet/expensas/teléfono, Salud para médicos/obras sociales/farmacias, Impuestos para AFIP/monotributo/impuestos, Otros para el resto.
+- Para "comercio": normalizar el nombre legible (ej: "EDENOR S.A." → "Edenor", "O.S.D.E." → "OSDE", "Agua y Saneamientos Argentinos" → "AySA").
+- Para "categoria_sugerida": Servicios para luz/gas/internet/expensas/teléfono/agua, Salud para médicos/obras sociales/farmacias, Impuestos para AFIP/monotributo/impuestos, Otros para el resto.
 - IMPORTANTE — Formato numérico argentino: punto (.) es miles, coma (,) es decimal. $10.600 = 10600, $1.250,50 = 1250.50. Siempre convertí a float sin separadores de miles.
 - Si no podés extraer algún campo, usá null.
-- La fecha es la de emisión del comprobante, NO la de vencimiento.
+- FECHA: Para facturas de servicios (luz, gas, agua, internet, teléfono, expensas), usá la fecha de VENCIMIENTO (1er vencimiento), ya que indica el período al que corresponde. Para tickets de compra o comprobantes de pago, usá la fecha de emisión.
 
 Respondé SOLO con el JSON, sin texto adicional.
 """

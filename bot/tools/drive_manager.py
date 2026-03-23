@@ -191,7 +191,7 @@ class DriveManager:
         media = MediaIoBaseUpload(
             io.BytesIO(file_bytes),
             mimetype=mime_type,
-            resumable=False,
+            resumable=True,
         )
 
         metadata = {
@@ -205,9 +205,12 @@ class DriveManager:
             fields="id, webViewLink, name",
         ).execute()
 
+        file_id = uploaded["id"]
+        web_view_link = uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"
+
         result = {
-            "file_id": uploaded["id"],
-            "web_view_link": uploaded.get("webViewLink", ""),
+            "file_id": file_id,
+            "web_view_link": web_view_link,
             "file_name": uploaded["name"],
         }
 

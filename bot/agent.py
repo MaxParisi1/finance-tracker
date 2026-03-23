@@ -509,10 +509,13 @@ COMPROBANTES Y FACTURAS (Google Drive):
     Si el usuario dice "solo guardá esto en drive" o similar, subí sin crear gasto.
 12. Al confirmar subida, llamá `subir_comprobante_a_drive` con los datos. Después de subir exitosamente,
     mostrá: nombre de archivo, ubicación en Drive y link.
+    Si también se creó un gasto (con `guardar_gasto`), SIEMPRE vinculá el comprobante al gasto
+    llamando `vincular_comprobante_a_gasto` con el archivo_id (devuelto por subir_comprobante_a_drive)
+    y el gasto_id (devuelto por guardar_gasto). Hacelo automáticamente sin preguntar.
 13. Si el usuario pide buscar un comprobante ("mostrá la factura de Edenor de febrero"),
     usá `buscar_comprobantes` y devolvé nombre, fecha, monto y link de Drive.
 14. Si al subir un comprobante detectás que hay un gasto del mismo comercio en fechas cercanas,
-    ofrecé vincularlos con `vincular_comprobante_a_gasto`.
+    vinculalos automáticamente con `vincular_comprobante_a_gasto` e informá al usuario.
 15. Si se detecta un duplicado (mismo comercio, fecha y tipo), informá al usuario y no subas de nuevo.
 """
 

@@ -20,6 +20,14 @@ oracle
 deploy-bot
 ```
 
+### Sincronizar .env local al servidor
+
+```bash
+sync-env
+```
+
+Copia `bot/.env` local al servidor y reinicia el bot automáticamente.
+
 ---
 
 ### Ver logs

@@ -101,10 +101,18 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
 
             await asyncio.to_thread(mark_as_read, email["id"])
 
+            def _escape_md(text: str) -> str:
+                """Limpia y escapa caracteres especiales de Markdown de Telegram."""
+                text = text.replace("*", " ")  # separador de procesador de pagos
+                for ch in ("_", "`", "["):
+                    text = text.replace(ch, f"\\{ch}")
+                return text.strip()
+
             moneda_sym = "USD " if data.get("moneda") == "USD" else "$"
+            comercio = _escape_md(str(data.get("comercio") or data.get("descripcion") or ""))
             msg = (
                 f"\U0001f4e7 *Gasto auto-registrado desde email:*\n"
-                f"\u2022 *{data.get('comercio') or data.get('descripcion')}*\n"
+                f"\u2022 *{comercio}*\n"
                 f"\u2022 {moneda_sym}{float(data['monto']):,.2f} \u00b7 {data.get('medio_pago', '').replace('_', ' ')}\n"
                 f"\u2022 Categoría: {data.get('categoria')}\n"
                 f"\u2022 Fecha: {data.get('fecha')}"

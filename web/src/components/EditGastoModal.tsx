@@ -10,10 +10,11 @@ const MEDIO_PAGO_OPTIONS = Object.entries(MEDIO_PAGO_LABELS)
 interface Props {
   gasto: Gasto
   categorias: string[]
+  comercios: string[]
   onClose: () => void
 }
 
-export default function EditGastoModal({ gasto, categorias, onClose }: Props) {
+export default function EditGastoModal({ gasto, categorias, comercios, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -26,6 +27,7 @@ export default function EditGastoModal({ gasto, categorias, onClose }: Props) {
     medio_pago: gasto.medio_pago ?? '',
     fecha: gasto.fecha,
     notas: gasto.notas ?? '',
+    comercio: gasto.comercio ?? '',
   })
 
   function set(field: string, value: string | number) {
@@ -82,6 +84,21 @@ export default function EditGastoModal({ gasto, categorias, onClose }: Props) {
               onChange={e => set('descripcion', e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Comercio</label>
+            <input
+              type="text"
+              list="comercios-list"
+              value={form.comercio}
+              onChange={e => set('comercio', e.target.value)}
+              placeholder="Sin comercio"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <datalist id="comercios-list">
+              {comercios.map(c => <option key={c} value={c} />)}
+            </datalist>
           </div>
 
           <div className="flex gap-3">

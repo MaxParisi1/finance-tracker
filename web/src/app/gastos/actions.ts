@@ -15,6 +15,7 @@ export async function updateGastoAction(
     medio_pago: string
     fecha: string
     notas?: string
+    comercio?: string
   },
 ) {
   const parsed = updateGastoSchema.safeParse(fields)
@@ -50,6 +51,7 @@ export async function updateGastoAction(
       medio_pago: fields.medio_pago,
       fecha: fields.fecha,
       notas: fields.notas ?? null,
+      comercio: fields.comercio?.trim() || null,
     })
     .eq('id', id)
 

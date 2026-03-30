@@ -12,6 +12,7 @@ interface Props {
   archivoCounts?: Record<string, number>
 }
 
+
 export default function GastosTableView({ gastos, categorias, archivoCounts }: Props) {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState('')
@@ -21,6 +22,11 @@ export default function GastosTableView({ gastos, categorias, archivoCounts }: P
 
   const mediosPago = useMemo(
     () => Array.from(new Set(gastos.map(g => g.medio_pago).filter(Boolean))).sort(),
+    [gastos],
+  )
+
+  const comercios = useMemo(
+    () => Array.from(new Set(gastos.map(g => g.comercio).filter((c): c is string => !!c))).sort(),
     [gastos],
   )
 
@@ -149,6 +155,7 @@ export default function GastosTableView({ gastos, categorias, archivoCounts }: P
         <EditGastoModal
           gasto={editing}
           categorias={categorias}
+          comercios={comercios}
           onClose={() => setEditing(null)}
         />
       )}

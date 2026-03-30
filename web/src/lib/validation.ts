@@ -19,6 +19,7 @@ export const updateGastoSchema = z.object({
   medio_pago: z.enum(MEDIOS_PAGO),
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD)'),
   notas: z.string().max(500).optional(),
+  comercio: z.string().max(200).optional(),
 })
 
 export const upsertPresupuestoSchema = z.object({

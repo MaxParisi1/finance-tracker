@@ -28,7 +28,7 @@ export default function ExpenseTable({ gastos, compact = false, onRowClick, arch
               Fecha
             </th>
             <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              Descripción
+              Comercio / Descripción
             </th>
             <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
               Categoría
@@ -54,8 +54,11 @@ export default function ExpenseTable({ gastos, compact = false, onRowClick, arch
                 {formatDate(g.fecha)}
               </td>
               <td className="py-3 px-4">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-gray-900">{g.descripcion}</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-gray-900">{g.comercio ?? g.descripcion}</span>
+                  {g.comercio && (
+                    <span className="text-xs text-gray-400 truncate max-w-[180px]">{g.descripcion}</span>
+                  )}
                   {g.cuotas > 1 && (
                     <span className="text-xs text-gray-400">
                       ({g.cuota_actual}/{g.cuotas})

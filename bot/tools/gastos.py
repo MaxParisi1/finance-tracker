@@ -5,7 +5,7 @@ Estas funciones son las que el agente llama como "tools".
 
 import calendar
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 from bot.db import queries
 from bot.tools.tipo_cambio import convertir_usd_a_ars, obtener_tipo_cambio
 
@@ -66,7 +66,8 @@ def guardar_gasto(
         logger.warning("guardar_gasto: moneda inválida=%r", moneda)
         raise ValueError(f"Moneda inválida: '{moneda}'. Usar 'ARS' o 'USD'.")
 
-    fecha_gasto = fecha or date.today().isoformat()
+    _AR = timezone(timedelta(hours=-3))
+    fecha_gasto = fecha or datetime.now(_AR).date().isoformat()
 
     gasto: dict = {
         "fecha": fecha_gasto,

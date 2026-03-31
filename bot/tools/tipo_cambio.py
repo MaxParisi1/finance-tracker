@@ -4,7 +4,7 @@ Guarda el valor en tipos_cambio_historico para auditoría.
 """
 
 import httpx
-from datetime import date
+from datetime import datetime, timezone, timedelta
 from bot.db import queries
 
 
@@ -47,7 +47,7 @@ def obtener_tipo_cambio(tipo: str = "oficial") -> dict:
     compra = float(cotizacion["value_buy"])
     venta = float(cotizacion["value_sell"])
     promedio = round((compra + venta) / 2, 4)
-    hoy = date.today().isoformat()
+    hoy = datetime.now(timezone(timedelta(hours=-3))).date().isoformat()
 
     # Guardar en histórico (upsert silencioso)
     try:

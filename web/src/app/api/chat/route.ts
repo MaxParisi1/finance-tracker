@@ -316,7 +316,7 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
             tipo_cambio_tipo,
             categoria,
             medio_pago,
-            fecha: fecha ?? new Date().toISOString().split('T')[0],
+            fecha: fecha ?? new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' }),
             notas: notas ?? null,
             cuotas: cuotas ?? 1,
             cuota_actual: 1,
@@ -329,7 +329,7 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
 
         // Auto-expandir cuotas 2..N
         if (cuotas && cuotas > 1) {
-          let fechaCuota = (fecha ?? new Date().toISOString().split('T')[0]) as string
+          let fechaCuota = (fecha ?? new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' })) as string
           for (let n = 2; n <= cuotas; n++) {
             fechaCuota = addOneMonth(fechaCuota)
             await supabase.from('gastos').insert({

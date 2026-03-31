@@ -8,7 +8,7 @@ SDK: google-genai (nuevo, reemplaza google-generativeai)
 import os
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 
 from google.genai import types
 
@@ -474,7 +474,7 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
 # ──────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
-    hoy = date.today().strftime("%d/%m/%Y")
+    hoy = datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y")
     return f"""Sos un asistente financiero personal. Hoy es {hoy}.
 
 REGLAS FUNDAMENTALES:

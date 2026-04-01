@@ -80,6 +80,20 @@ def actualizar_gasto(gasto_id: str, campos: dict) -> dict:
     return res.data[0]
 
 
+def obtener_comercios() -> list[str]:
+    """Devuelve todos los nombres de comercio distintos, ordenados alfabéticamente."""
+    client = get_client()
+    res = (
+        client.table("gastos")
+        .select("comercio")
+        .is_("deleted_at", "null")
+        .not_("comercio", "is", None)
+        .execute()
+    )
+    unique = sorted({r["comercio"] for r in res.data if r.get("comercio")})
+    return unique
+
+
 def eliminar_gasto(gasto_id: str) -> bool:
     """Soft delete: marca el gasto como eliminado sin borrarlo de la DB."""
     from datetime import datetime, timezone

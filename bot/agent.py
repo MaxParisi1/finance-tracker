@@ -474,8 +474,24 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
 # ──────────────────────────────────────────────
 
 def _build_system_prompt() -> str:
+    from bot.db.queries import obtener_comercios
     hoy = datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y")
+    try:
+        comercios = obtener_comercios()
+        comercios_str = ", ".join(comercios) if comercios else "ninguno aún"
+    except Exception:
+        comercios_str = ""
+
+    comercios_section = (
+        f"\nCOMERCIOS CONOCIDOS: {comercios_str}\n"
+        "Cuando identifiques un comercio (desde texto del usuario, extracto bancario o PDF), "
+        "usá el nombre exacto de esta lista si reconocés que es el mismo, sin importar cómo venga escrito. "
+        "Por ejemplo, 'SUBE VIAJES - BUSE' → 'BUSES', 'UBER TRIP' → 'Uber'. "
+        "Si no hay match claro, usá el nombre más limpio y legible posible.\n"
+    ) if comercios_str else ""
+
     return f"""Sos un asistente financiero personal. Hoy es {hoy}.
+{comercios_section}
 
 REGLAS FUNDAMENTALES:
 1. Respondés SIEMPRE en español argentino.

@@ -9,11 +9,12 @@ import { formatARS } from '@/lib/utils'
 interface Props {
   gastos: Gasto[]
   categorias: string[]
+  comercios?: string[]
   archivoCounts?: Record<string, number>
 }
 
 
-export default function GastosTableView({ gastos, categorias, archivoCounts }: Props) {
+export default function GastosTableView({ gastos, categorias, comercios: comerciosProp, archivoCounts }: Props) {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState('')
   const [moneda, setMoneda] = useState('')
@@ -25,10 +26,11 @@ export default function GastosTableView({ gastos, categorias, archivoCounts }: P
     [gastos],
   )
 
-  const comercios = useMemo(
+  const comerciosDelMes = useMemo(
     () => Array.from(new Set(gastos.map(g => g.comercio).filter((c): c is string => !!c))).sort(),
     [gastos],
   )
+  const comercios = comerciosProp ?? comerciosDelMes
 
   const filtered = useMemo(() => {
     return gastos.filter(g => {

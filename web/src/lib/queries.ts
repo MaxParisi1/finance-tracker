@@ -65,6 +65,19 @@ export async function searchGastos(q: string): Promise<Gasto[]> {
   return data ?? []
 }
 
+export async function getAllComercios(): Promise<string[]> {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('gastos')
+    .select('comercio')
+    .is('deleted_at', null)
+    .not('comercio', 'is', null)
+    .order('comercio')
+  if (error) throw error
+  const unique = Array.from(new Set((data ?? []).map(r => r.comercio as string).filter(Boolean)))
+  return unique.sort()
+}
+
 export async function getCategorias(): Promise<Categoria[]> {
   const supabase = getSupabaseServer()
   const { data, error } = await supabase

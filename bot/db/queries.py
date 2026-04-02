@@ -256,12 +256,18 @@ def obtener_archivos_drive(filtros: dict) -> list[dict]:
 
 
 def vincular_archivo_a_gasto(archivo_id: str, gasto_id: str) -> dict:
-    """Vincula un archivo de Drive con un gasto existente."""
+    """Vincula un archivo de Drive con un gasto existente.
+
+    archivo_id puede ser el UUID de Supabase o el drive_file_id de Google Drive.
+    """
+    import re
     client = get_client()
+    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+    column = "id" if _UUID_RE.match(archivo_id) else "drive_file_id"
     res = (
         client.table("archivos_drive")
         .update({"gasto_id": gasto_id})
-        .eq("id", archivo_id)
+        .eq(column, archivo_id)
         .execute()
     )
     return res.data[0] if res.data else {}

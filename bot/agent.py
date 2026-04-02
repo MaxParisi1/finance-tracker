@@ -379,7 +379,7 @@ _TOOL_DECLARATIONS = [
         parameters=types.Schema(
             type="OBJECT",
             properties={
-                "archivo_id": types.Schema(type="STRING", description="UUID del archivo en archivos_drive"),
+                "archivo_id": types.Schema(type="STRING", description="El campo 'id' (UUID) devuelto por subir_comprobante_a_drive. NO usar el drive_file_id ni la URL."),
                 "gasto_id":   types.Schema(type="STRING", description="UUID del gasto a vincular"),
             },
             required=["archivo_id", "gasto_id"],
@@ -526,8 +526,10 @@ COMPROBANTES Y FACTURAS (Google Drive):
 12. Al confirmar subida, llamá `subir_comprobante_a_drive` con los datos. Después de subir exitosamente,
     mostrá: nombre de archivo, ubicación en Drive y link.
     Si también se creó un gasto (con `guardar_gasto`), SIEMPRE vinculá el comprobante al gasto
-    llamando `vincular_comprobante_a_gasto` con el archivo_id (devuelto por subir_comprobante_a_drive)
-    y el gasto_id (devuelto por guardar_gasto). Hacelo automáticamente sin preguntar.
+    llamando `vincular_comprobante_a_gasto` con:
+    - archivo_id = el campo "id" del resultado de subir_comprobante_a_drive (es un UUID, ej: "d20555aa-...")
+    - gasto_id = el campo "id" del resultado de guardar_gasto
+    NO uses el link ni el drive_file_id como archivo_id. Hacelo automáticamente sin preguntar.
 13. Si el usuario pide buscar un comprobante ("mostrá la factura de Edenor de febrero"),
     usá `buscar_comprobantes` y devolvé nombre, fecha, monto y link de Drive.
 14. Si al subir un comprobante detectás que hay un gasto del mismo comercio en fechas cercanas,

@@ -18,8 +18,8 @@ export default async function RecurrentesPage() {
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-900">Gastos recurrentes</h1>
-            <p className="text-gray-500 text-sm mt-1">
+            <h1 className="text-2xl font-bold text-foreground">Gastos recurrentes</h1>
+            <p className="text-muted-foreground text-sm mt-1">
               Suscripciones, servicios y pagos periódicos · hacé click en uno para editarlo
             </p>
           </div>

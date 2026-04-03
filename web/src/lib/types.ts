@@ -66,6 +66,23 @@ export interface TendenciaMes {
   variacion_pct: number | null
 }
 
+export interface PlanCuota {
+  id: string
+  descripcion: string
+  comercio: string | null
+  categoria: string | null
+  medio_pago: string
+  monto_cuota: number | null
+  moneda: string
+  cuotas_total: number
+  cuota_actual: number
+  dia_del_mes: number
+  proximo_vencimiento: string
+  tipo: 'fijo' | 'variable'
+  activo: boolean
+  created_at: string
+}
+
 export interface ArchivoDrive {
   id: string
   gasto_id: string | null

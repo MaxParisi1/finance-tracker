@@ -1,5 +1,5 @@
 import { getSupabaseServer } from './supabase'
-import type { Gasto, GastoRecurrente, Categoria, MensualResumen, TendenciaMes, ArchivoDrive } from './types'
+import type { Gasto, GastoRecurrente, Categoria, MensualResumen, TendenciaMes, ArchivoDrive, PlanCuota } from './types'
 import { monthLabel } from './utils'
 
 // ──────────────────────────────────────────────
@@ -505,6 +505,33 @@ export async function getArchivosPorGasto(gastoId: string): Promise<ArchivoDrive
   if (error) throw error
   return data ?? []
 }
+
+// ──────────────────────────────────────────────
+// Planes de cuota
+// ──────────────────────────────────────────────
+
+export async function getPlanesCuota(): Promise<PlanCuota[]> {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('planes_cuota')
+    .select('*')
+    .order('proximo_vencimiento', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function getPlanesCuotaActivos(): Promise<PlanCuota[]> {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('planes_cuota')
+    .select('*')
+    .eq('activo', true)
+    .order('proximo_vencimiento', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+// ──────────────────────────────────────────────
 
 export async function contarArchivosPorGastos(gastoIds: string[]): Promise<Record<string, number>> {
   if (gastoIds.length === 0) return {}

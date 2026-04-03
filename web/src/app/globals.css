@@ -2,18 +2,146 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design Tokens ──────────────────────────────────────────── */
 @layer base {
-  /* PWA standalone: empuja el contenido debajo del Dynamic Island */
+  :root {
+    /* Backgrounds */
+    --background:         0 0% 98%;
+    --foreground:         240 10% 4%;
+
+    /* Card / Surface */
+    --card:               0 0% 100%;
+    --card-foreground:    240 10% 4%;
+
+    /* Popover */
+    --popover:            0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+
+    /* Primary — Indigo */
+    --primary:            239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — Indigo tinted surface */
+    --secondary:          239 84% 97%;
+    --secondary-foreground: 239 84% 40%;
+
+    /* Muted — Zinc */
+    --muted:              240 5% 96%;
+    --muted-foreground:   240 4% 46%;
+
+    /* Accent — Violet */
+    --accent:             262 83% 58%;
+    --accent-foreground:  0 0% 100%;
+
+    /* Destructive — Rose */
+    --destructive:        347 77% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Success — Emerald */
+    --success:            160 84% 39%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning — Amber */
+    --warning:            38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Border / Input / Ring */
+    --border:             240 6% 90%;
+    --input:              240 6% 90%;
+    --ring:               239 84% 67%;
+
+    /* Radius base */
+    --radius:             0.625rem;
+  }
+
+  .dark {
+    --background:         240 10% 4%;
+    --foreground:         0 0% 98%;
+
+    --card:               240 10% 7%;
+    --card-foreground:    0 0% 98%;
+
+    --popover:            240 10% 7%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary:            239 100% 72%;
+    --primary-foreground: 240 10% 4%;
+
+    --secondary:          240 4% 14%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted:              240 4% 14%;
+    --muted-foreground:   240 5% 60%;
+
+    --accent:             262 83% 68%;
+    --accent-foreground:  0 0% 100%;
+
+    --destructive:        347 77% 62%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success:            160 60% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --warning:            38 95% 60%;
+    --warning-foreground: 0 0% 100%;
+
+    --border:             240 4% 16%;
+    --input:              240 4% 16%;
+    --ring:               239 100% 72%;
+  }
+}
+
+/* ─── Base Styles ────────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* PWA: empuja contenido debajo del Dynamic Island */
   @media screen and (max-width: 767px) {
     body {
       padding-top: env(safe-area-inset-top, 0px);
     }
   }
+
+  /* Scrollbar sutil */
+  ::-webkit-scrollbar        { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb  { @apply bg-border rounded-full; }
 }
 
+/* ─── Utilities ──────────────────────────────────────────────── */
 @layer utilities {
-  /* BottomNav: espacio encima del home indicator */
+  /* PWA safe areas */
   .pb-safe    { padding-bottom: env(safe-area-inset-bottom, 0px); }
-  /* Páginas: padding bottom que incluye safe area + espacio para el nav */
   .pb-safe-24 { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6rem); }
+
+  /* Glassmorphism */
+  .glass {
+    @apply bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-white/20 dark:border-white/10;
+  }
+  .glass-nav {
+    @apply bg-white/90 dark:bg-black/80 backdrop-blur-2xl border border-zinc-200/80 dark:border-zinc-800/80;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 bg-clip-text text-transparent;
+  }
+
+  /* Gradient backgrounds */
+  .gradient-primary {
+    @apply bg-gradient-to-r from-indigo-600 to-violet-600;
+  }
+  .gradient-active {
+    @apply bg-gradient-to-r from-blue-600 to-purple-600;
+  }
+
+  /* Tabular nums para montos */
+  .tabular { font-variant-numeric: tabular-nums; }
 }

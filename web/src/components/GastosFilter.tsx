@@ -2,11 +2,18 @@
 
 import { useRouter } from 'next/navigation'
 import { MONTH_NAMES_CAP } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface GastosFilterProps {
   mes: number
   anio: number
 }
+
+const selectClass = cn(
+  'h-9 rounded-lg border border-input bg-background px-3 text-sm',
+  'ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'transition-colors text-foreground cursor-pointer'
+)
 
 export default function GastosFilter({ mes, anio }: GastosFilterProps) {
   const router = useRouter()
@@ -19,11 +26,11 @@ export default function GastosFilter({ mes, anio }: GastosFilterProps) {
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2">
       <select
         value={mes}
         onChange={e => handleChange(Number(e.target.value), anio)}
-        className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        className={selectClass}
       >
         {MONTH_NAMES_CAP.map((name, i) => (
           <option key={i + 1} value={i + 1}>
@@ -35,7 +42,7 @@ export default function GastosFilter({ mes, anio }: GastosFilterProps) {
       <select
         value={anio}
         onChange={e => handleChange(mes, Number(e.target.value))}
-        className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        className={selectClass}
       >
         {years.map(y => (
           <option key={y} value={y}>

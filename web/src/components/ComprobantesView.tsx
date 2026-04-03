@@ -2,7 +2,12 @@
 
 import { useState, useMemo } from 'react'
 import type { ArchivoDrive } from '@/lib/types'
-import { formatARS, formatDate } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { Search, X, ExternalLink } from 'lucide-react'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 const TIPO_LABELS: Record<string, string> = {
   factura: 'Factura',
@@ -12,13 +17,19 @@ const TIPO_LABELS: Record<string, string> = {
   resumen: 'Resumen',
 }
 
-const TIPO_COLORS: Record<string, string> = {
-  factura: 'bg-blue-50 text-blue-700',
-  comprobante: 'bg-emerald-50 text-emerald-700',
-  ticket: 'bg-amber-50 text-amber-700',
-  recibo: 'bg-purple-50 text-purple-700',
-  resumen: 'bg-gray-100 text-gray-700',
+const TIPO_VARIANTS: Record<string, 'default' | 'secondary' | 'warning' | 'muted'> = {
+  factura:     'default',
+  comprobante: 'secondary',
+  ticket:      'warning',
+  recibo:      'muted',
+  resumen:     'muted',
 }
+
+const selectClass = cn(
+  'h-9 rounded-lg border border-input bg-background px-3 text-sm',
+  'ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'transition-colors text-foreground cursor-pointer'
+)
 
 interface Props {
   archivos: ArchivoDrive[]
@@ -54,122 +65,100 @@ export default function ComprobantesView({ archivos, categorias }: Props) {
   return (
     <div>
       {/* Filtros */}
-      <div className="flex flex-wrap gap-3 mb-5">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por comercio o archivo..."
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 w-64"
-        />
+      <div className="flex flex-wrap gap-2 mb-5">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por comercio o archivo..."
+            className={cn(
+              'h-9 w-56 rounded-lg border border-input bg-background pl-9 pr-8 text-sm',
+              'placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-colors'
+            )}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
 
-        <select
-          value={categoria}
-          onChange={e => setCategoria(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
+        <select value={categoria} onChange={e => setCategoria(e.target.value)} className={selectClass}>
           <option value="">Todas las categorías</option>
-          {categorias.map(c => (
-            <option key={c} value={c}>{c}</option>
-          ))}
+          {categorias.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
-        <select
-          value={tipo}
-          onChange={e => setTipo(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
+        <select value={tipo} onChange={e => setTipo(e.target.value)} className={selectClass}>
           <option value="">Todos los tipos</option>
-          {tipos.map(t => (
-            <option key={t} value={t}>{TIPO_LABELS[t] ?? t}</option>
-          ))}
+          {tipos.map(t => <option key={t} value={t}>{TIPO_LABELS[t] ?? t}</option>)}
         </select>
 
         {hasFilters && (
-          <button
-            onClick={() => { setSearch(''); setCategoria(''); setTipo('') }}
-            className="text-sm text-gray-400 hover:text-gray-600 px-2"
-          >
-            ✕ Limpiar
-          </button>
+          <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setCategoria(''); setTipo('') }}>
+            <X className="w-3.5 h-3.5 mr-1" />
+            Limpiar
+          </Button>
         )}
       </div>
 
       {/* Resumen */}
-      <div className="flex items-center gap-4 mb-4 text-sm text-gray-500">
+      <div className="flex items-center gap-3 mb-4 text-sm text-muted-foreground">
         <span>
-          <span className="font-semibold text-gray-900">{filtered.length}</span> archivos
+          <span className="font-semibold text-foreground">{filtered.length}</span> archivos
           {hasFilters && archivos.length !== filtered.length && (
-            <span className="text-gray-400"> (de {archivos.length} total)</span>
+            <span> (de {archivos.length} total)</span>
           )}
         </span>
       </div>
 
       {/* Tabla */}
-      <div className="bg-white rounded-xl border border-gray-200">
+      <Card className="overflow-hidden">
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">
+          <div className="text-center py-12 text-muted-foreground text-sm">
             No hay comprobantes en este período.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Fecha
-                  </th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Comercio
-                  </th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Tipo
-                  </th>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Categoría
-                  </th>
-                  <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Monto
-                  </th>
-                  <th className="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Gasto
-                  </th>
-                  <th className="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Archivo
-                  </th>
+                <tr className="border-b border-border">
+                  {['Fecha', 'Comercio', 'Tipo', 'Gasto', 'Archivo'].map((h, i) => (
+                    <th
+                      key={h}
+                      className={cn(
+                        'py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide',
+                        i < 3 ? 'text-left' : 'text-center'
+                      )}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border/60">
                 {filtered.map(a => (
-                  <tr key={a.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
+                  <tr key={a.id} className="hover:bg-muted/50 transition-colors">
+                    <td className="py-3 px-4 text-muted-foreground whitespace-nowrap tabular">
                       {formatDate(a.fecha)}
                     </td>
-                    <td className="py-3 px-4 text-gray-900">
+                    <td className="py-3 px-4 font-medium text-foreground">
                       {a.comercio ?? '—'}
                     </td>
                     <td className="py-3 px-4">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIPO_COLORS[a.tipo] ?? 'bg-gray-100 text-gray-600'}`}>
+                      <Badge variant={TIPO_VARIANTS[a.tipo] ?? 'muted'}>
                         {TIPO_LABELS[a.tipo] ?? a.tipo}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-600">
-                      {a.categoria ?? '—'}
-                    </td>
-                    <td className="py-3 px-4 text-right font-medium text-gray-900 whitespace-nowrap">
-                      {a.monto != null ? (
-                        <>
-                          {a.moneda === 'USD' ? `USD ${a.monto.toFixed(2)}` : formatARS(a.monto)}
-                        </>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
+                      </Badge>
                     </td>
                     <td className="py-3 px-4 text-center">
                       {a.gasto_id ? (
-                        <span className="text-emerald-600 text-xs font-medium">Vinculado</span>
+                        <Badge variant="success" className="text-[10px]">Vinculado</Badge>
                       ) : (
-                        <span className="text-gray-400 text-xs">—</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -178,12 +167,13 @@ export default function ComprobantesView({ archivos, categorias }: Props) {
                           href={a.drive_web_view_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 text-xs font-medium underline"
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium transition-colors"
                         >
-                          Ver en Drive
+                          Ver
+                          <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span className="text-gray-400 text-xs">—</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
                   </tr>
@@ -192,7 +182,7 @@ export default function ComprobantesView({ archivos, categorias }: Props) {
             </table>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

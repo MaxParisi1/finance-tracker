@@ -29,8 +29,8 @@ export default async function ComprobantesPage({
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Comprobantes</h1>
-              <p className="text-gray-500 text-sm mt-1">
+              <h1 className="text-2xl font-bold text-foreground">Comprobantes</h1>
+              <p className="text-muted-foreground text-sm mt-1">
                 {monthLabel(mes, anio)} · {archivos.length} archivos en Drive
               </p>
             </div>

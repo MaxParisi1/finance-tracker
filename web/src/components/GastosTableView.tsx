@@ -5,6 +5,10 @@ import type { Gasto } from '@/lib/types'
 import ExpenseTable from './ExpenseTable'
 import EditGastoModal from './EditGastoModal'
 import { formatARS } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { Search, X, Download } from 'lucide-react'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   gastos: Gasto[]
@@ -13,6 +17,11 @@ interface Props {
   archivoCounts?: Record<string, number>
 }
 
+const selectClass = cn(
+  'h-9 rounded-lg border border-input bg-background px-3 text-sm',
+  'ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'transition-colors text-foreground cursor-pointer'
+)
 
 export default function GastosTableView({ gastos, categorias, comercios: comerciosProp, archivoCounts }: Props) {
   const [search, setSearch] = useState('')
@@ -78,80 +87,83 @@ export default function GastosTableView({ gastos, categorias, comercios: comerci
   return (
     <div>
       {/* Filtros */}
-      <div className="flex flex-wrap gap-3 mb-5">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="🔍 Buscar descripción o comercio..."
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 w-64"
-        />
+      <div className="flex flex-wrap gap-2 mb-5">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar descripción o comercio..."
+            className={cn(
+              'h-9 w-56 rounded-lg border border-input bg-background pl-9 pr-8 text-sm',
+              'ring-offset-background placeholder:text-muted-foreground',
+              'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-colors'
+            )}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
 
-        <select
-          value={categoria}
-          onChange={e => setCategoria(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
+        <select value={categoria} onChange={e => setCategoria(e.target.value)} className={selectClass}>
           <option value="">Todas las categorías</option>
           {categorias.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
-        <select
-          value={mediopago}
-          onChange={e => setMediopago(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
+        <select value={mediopago} onChange={e => setMediopago(e.target.value)} className={selectClass}>
           <option value="">Todos los medios de pago</option>
           {mediosPago.map(mp => <option key={mp} value={mp}>{mp}</option>)}
         </select>
 
-        <select
-          value={moneda}
-          onChange={e => setMoneda(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
+        <select value={moneda} onChange={e => setMoneda(e.target.value)} className={selectClass}>
           <option value="">ARS + USD</option>
           <option value="ARS">Solo ARS</option>
           <option value="USD">Solo USD</option>
         </select>
 
         {hasFilters && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => { setSearch(''); setCategoria(''); setMoneda(''); setMediopago('') }}
-            className="text-sm text-gray-400 hover:text-gray-600 px-2"
           >
-            ✕ Limpiar
-          </button>
+            <X className="w-3.5 h-3.5 mr-1" />
+            Limpiar
+          </Button>
         )}
 
-        <button
-          onClick={exportCSV}
-          className="ml-auto text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white hover:bg-gray-50 text-gray-600 transition-colors"
-        >
-          ↓ Exportar CSV
-        </button>
+        <Button variant="outline" size="sm" onClick={exportCSV} className="ml-auto gap-1.5">
+          <Download className="w-3.5 h-3.5" />
+          CSV
+        </Button>
       </div>
 
       {/* Resumen de resultados */}
-      <div className="flex items-center gap-4 mb-4 text-sm text-gray-500">
+      <div className="flex items-center gap-3 mb-4 text-sm text-muted-foreground">
         <span>
-          <span className="font-semibold text-gray-900">{filtered.length}</span> gastos ·{' '}
-          <span className="font-semibold text-gray-900">{formatARS(totalARS)}</span>
+          <span className="font-semibold text-foreground">{filtered.length}</span> gastos ·{' '}
+          <span className="font-semibold text-foreground">{formatARS(totalARS)}</span>
           {hasFilters && gastos.length !== filtered.length && (
-            <span className="text-gray-400"> (de {gastos.length} total)</span>
+            <span className="text-muted-foreground"> (de {gastos.length} total)</span>
           )}
         </span>
         {totalUSD > 0 && (
-          <span>
-            · <span className="font-semibold text-blue-600">USD {totalUSD.toFixed(2)}</span> en USD
+          <span className="text-blue-500 font-medium">
+            · USD {totalUSD.toFixed(2)}
           </span>
         )}
       </div>
 
       {/* Tabla */}
-      <div className="bg-white rounded-xl border border-gray-200">
+      <Card className="overflow-hidden">
         <ExpenseTable gastos={filtered} onRowClick={setEditing} archivoCounts={archivoCounts} />
-      </div>
+      </Card>
 
       {editing && (
         <EditGastoModal

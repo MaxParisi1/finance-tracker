@@ -409,6 +409,25 @@ _TOOL_DECLARATIONS = [
 
 TOOLS = types.Tool(function_declarations=_TOOL_DECLARATIONS)
 
+# Tools que efectivamente persisten un gasto en la DB
+_SAVE_TOOLS = {"guardar_gasto", "guardar_multiples_gastos", "guardar_gasto_recurrente"}
+
+# Palabras que el usuario usa para confirmar
+_PALABRAS_CONFIRMACION = {"sí", "si", "dale", "ok", "confirmado", "va", "confirmo", "listo", "sí dale", "si dale"}
+
+# Palabras que el modelo usa cuando "afirma" haber guardado (señal de alucinación si no hubo tool call)
+_PALABRAS_GUARDADO_MODELO = ["guardé", "guardado", "registré", "registrado", "he guardado", "fue guardado", "quedó guardado"]
+
+
+def _es_confirmacion(msg: str) -> bool:
+    normalized = msg.strip().lower()
+    return any(normalized == c or normalized.startswith(c + " ") for c in _PALABRAS_CONFIRMACION)
+
+
+def _modelo_afirma_guardado(text: str) -> bool:
+    normalized = text.lower()
+    return any(k in normalized for k in _PALABRAS_GUARDADO_MODELO)
+
 
 # ──────────────────────────────────────────────
 # Dispatcher
@@ -498,7 +517,10 @@ REGLAS FUNDAMENTALES:
 2. NUNCA guardás un gasto sin mostrar primero un resumen y recibir confirmación explícita del usuario.
    - 1 gasto → formato: "Voy a guardar: **$MONTO MONEDA** en **DESCRIPCIÓN** (CATEGORÍA) · MEDIO_PAGO · FECHA. ¿Confirmo?"
    - 2+ gastos → listado numerado + total, luego "¿Guardo los N gastos?". Usar guardar_multiples_gastos, no llamar guardar_gasto N veces.
-3. Palabras de confirmación válidas: "sí", "si", "dale", "ok", "confirmado", "va", "sí dale", "confirmo".
+3. Palabras de confirmación válidas: "sí", "si", "dale", "ok", "confirmado", "va", "sí dale", "confirmo", "listo".
+   CRÍTICO: Cuando el usuario confirma, tu ÚNICA acción válida es llamar INMEDIATAMENTE a `guardar_gasto`
+   o `guardar_multiples_gastos`. JAMÁS respondas con texto diciendo "guardado" o "registrado" sin haber
+   llamado primero la función. Si no llamás la función, el gasto NO se guarda. Texto ≠ acción real.
 4. Si el usuario corrige algo en su respuesta, actualizar los datos y volver a pedir confirmación.
 5. Usás el tipo de cambio **oficial** por defecto para conversiones de USD a ARS, salvo que el usuario indique otro.
 6. Siempre informás el tipo de cambio usado cuando guardás un gasto en USD.
@@ -507,8 +529,9 @@ REGLAS FUNDAMENTALES:
    - Usá el campo `comercio` devuelto como nombre canónico (no el que mencionó el usuario ni el que
      parseaste vos), para mantener consistencia en los datos.
    - Usá la categoría y medio de pago más frecuentes directamente, sin preguntar.
-   Si no hay historial, consultá las categorías disponibles e inferí por contexto. Solo preguntás
-   si realmente no podés determinarlo.
+   Si no hay historial, SIEMPRE llamá `obtener_categorias` para ver las categorías válidas disponibles.
+   NUNCA inventes ni uses una categoría que no esté en esa lista. Solo preguntás al usuario si
+   realmente no podés inferir la categoría correcta del contexto.
 8. El campo `comercio` SIEMPRE debe completarse cuando hay un comercio, marca o servicio identificable
    (Cabify, Mercado Pago, Netflix, Farmacity, etc.). La `descripcion` es para el concepto del gasto
    ("Viaje al aeropuerto", "Suscripción mensual"), no para el nombre del negocio. Si el usuario dice
@@ -583,6 +606,8 @@ def run_agent(
         else:
             raise
 
+    save_tool_called = False
+
     for _ in range(MAX_ITER):
         if not response.candidates or not response.candidates[0].content.parts:
             break
@@ -598,6 +623,8 @@ def run_agent(
 
         function_response_parts = []
         for fc in function_calls:
+            if fc.name in _SAVE_TOOLS:
+                save_tool_called = True
             resultado_str = _ejecutar_funcion(fc.name, dict(fc.args))
             logger.info(f"Tool: {fc.name} → {resultado_str[:200]}")
             function_response_parts.append(
@@ -617,6 +644,53 @@ def run_agent(
                 response = chat.send_message(function_response_parts)
             else:
                 raise
+
+    # ── Guardia anti-alucinación ──────────────────────────────────────────────
+    # Si el usuario confirmó y el modelo afirmó haber guardado pero no llamó
+    # ninguna save tool, inyectamos un mensaje de recovery forzado.
+    try:
+        final_text = response.text or ""
+    except Exception:
+        final_text = ""
+
+    if _es_confirmacion(user_message) and not save_tool_called and _modelo_afirma_guardado(final_text):
+        logger.warning(
+            f"[ALUCINACION DETECTADA] chat_id={chat_id} | Usuario confirmó, modelo dijo 'guardado' "
+            f"pero no llamó ninguna save tool. Ejecutando recovery."
+        )
+        recovery_msg = (
+            "SISTEMA: Detecté que afirmaste haber guardado el gasto pero no llamaste a "
+            "`guardar_gasto` ni `guardar_multiples_gastos`. El gasto AÚN NO fue guardado. "
+            "Llamá AHORA MISMO a la función de guardado con los datos del gasto pendiente de confirmación."
+        )
+        try:
+            response = chat.send_message(recovery_msg)
+            if response.candidates and response.candidates[0].content.parts:
+                recovery_calls = [
+                    part.function_call
+                    for part in response.candidates[0].content.parts
+                    if part.function_call and part.function_call.name
+                ]
+                if recovery_calls:
+                    recovery_parts = []
+                    for fc in recovery_calls:
+                        resultado_str = _ejecutar_funcion(fc.name, dict(fc.args))
+                        logger.info(f"Tool (recovery): {fc.name} → {resultado_str[:200]}")
+                        recovery_parts.append(
+                            types.Part.from_function_response(
+                                name=fc.name,
+                                response={"result": resultado_str},
+                            )
+                        )
+                    response = chat.send_message(recovery_parts)
+                else:
+                    logger.error(
+                        f"[RECOVERY FALLIDO] chat_id={chat_id} | El modelo no llamó ninguna tool "
+                        f"en el recovery. El gasto se perdió."
+                    )
+        except Exception:
+            logger.exception(f"[RECOVERY ERROR] chat_id={chat_id} | Error en recovery de alucinación")
+    # ─────────────────────────────────────────────────────────────────────────
 
     try:
         text = response.text

@@ -593,18 +593,30 @@ def run_agent(
             types.Content(role=turn["role"], parts=[types.Part(text=p) for p in turn["parts"]])
         )
 
-    chat = create_chat_with_fallback(model=MODEL, config=config, history=gemini_history)
+    def _needs_paid_fallback(exc: Exception) -> bool:
+        """True para errores que se resuelven cambiando a la API key paga."""
+        if isinstance(exc, genai.errors.ClientError) and exc.code == 429:
+            return True
+        if isinstance(exc, genai.errors.ServerError) and exc.code == 503:
+            return True
+        return False
 
-    try:
-        response = chat.send_message(user_message)
-    except genai.errors.ClientError as e:
-        if e.code == 429:
-            chat = create_chat_with_fallback(
-                model=MODEL, config=config, history=gemini_history, force_paid=True
-            )
-            response = chat.send_message(user_message)
-        else:
+    def _send(chat_obj, payload):
+        """Envía un mensaje con fallback automático a la key paga en 429/503."""
+        nonlocal chat
+        try:
+            return chat_obj.send_message(payload)
+        except Exception as e:
+            if _needs_paid_fallback(e):
+                logger.warning(f"Error {e.__class__.__name__} ({getattr(e, 'code', '?')}), reintentando con API key paga")
+                chat = create_chat_with_fallback(
+                    model=MODEL, config=config, history=gemini_history, force_paid=True
+                )
+                return chat.send_message(payload)
             raise
+
+    chat = create_chat_with_fallback(model=MODEL, config=config, history=gemini_history)
+    response = _send(chat, user_message)
 
     save_tool_called = False
 
@@ -634,16 +646,7 @@ def run_agent(
                 )
             )
 
-        try:
-            response = chat.send_message(function_response_parts)
-        except genai.errors.ClientError as e:
-            if e.code == 429:
-                chat = create_chat_with_fallback(
-                    model=MODEL, config=config, history=gemini_history, force_paid=True
-                )
-                response = chat.send_message(function_response_parts)
-            else:
-                raise
+        response = _send(chat, function_response_parts)
 
     # ── Guardia anti-alucinación ──────────────────────────────────────────────
     # Si el usuario confirmó y el modelo afirmó haber guardado pero no llamó

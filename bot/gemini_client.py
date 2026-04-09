@@ -48,20 +48,28 @@ def generate_with_fallback(model: str, **kwargs):
     client = _get_free_client()
     try:
         return client.models.generate_content(model=model, **kwargs)
-    except genai.errors.ClientError as e:
-        if e.code == 429:
+    except Exception as e:
+        if _needs_paid_fallback(e):
             paid = _get_paid_client()
             if paid:
-                logger.warning("Quota free tier agotada, usando API key paga")
+                logger.warning(f"Error {e.__class__.__name__} ({getattr(e, 'code', '?')}), usando API key paga")
                 return paid.models.generate_content(model=model, **kwargs)
-            else:
-                logger.error("Quota agotada y no hay GOOGLE_API_KEY_PAID configurada")
+            logger.error("Fallback a key paga necesario pero no hay GOOGLE_API_KEY_PAID configurada")
         raise
+
+
+def _needs_paid_fallback(exc: Exception) -> bool:
+    """True para errores que se resuelven cambiando a la API key paga (quota o servidor saturado)."""
+    if isinstance(exc, genai.errors.ClientError) and exc.code == 429:
+        return True
+    if isinstance(exc, genai.errors.ServerError) and exc.code == 503:
+        return True
+    return False
 
 
 def create_chat_with_fallback(model: str, config, history, force_paid: bool = False):
     """
-    Crea un chat de Gemini. Si force_paid=True o el free tier da 429, usa la key paga.
+    Crea un chat de Gemini. Si force_paid=True, o el free tier da 429/503, usa la key paga.
     """
     if force_paid:
         paid = _get_paid_client()
@@ -72,14 +80,12 @@ def create_chat_with_fallback(model: str, config, history, force_paid: bool = Fa
 
     client = _get_free_client()
     try:
-        chat = client.chats.create(model=model, config=config, history=history)
-        return chat
-    except genai.errors.ClientError as e:
-        if e.code == 429:
+        return client.chats.create(model=model, config=config, history=history)
+    except Exception as e:
+        if _needs_paid_fallback(e):
             paid = _get_paid_client()
             if paid:
-                logger.warning("Quota free tier agotada al crear chat, usando API key paga")
+                logger.warning(f"Error {e.__class__.__name__} ({getattr(e, 'code', '?')}) al crear chat, usando API key paga")
                 return paid.chats.create(model=model, config=config, history=history)
-            else:
-                logger.error("Quota agotada y no hay GOOGLE_API_KEY_PAID configurada")
+            logger.error("Fallback a key paga necesario pero no hay GOOGLE_API_KEY_PAID configurada")
         raise

@@ -424,24 +424,59 @@ def top_comercios(mes: int | None = None, anio: int | None = None, limite: int =
     }
 
 
+def _normalizar_comercio(nombre: str) -> str:
+    """
+    Intenta encontrar el nombre canónico del comercio comparando contra los comercios conocidos.
+    Usa matching por prefijo de palabras (ej: 'BUSE' → 'BUSES').
+    Devuelve el nombre canónico si encuentra match, o el original si no.
+    """
+    import re
+
+    comercios = queries.obtener_comercios()
+    if not comercios:
+        return nombre
+
+    nombre_lower = nombre.lower()
+    palabras_input = [w for w in re.split(r"[\s\-_/,]+", nombre_lower) if len(w) >= 4]
+
+    for comercio in comercios:
+        c_lower = comercio.lower()
+        # Match directo (substring)
+        if c_lower in nombre_lower or nombre_lower in c_lower:
+            return comercio
+        # Match por prefijo de palabras (ej: "buse" es prefijo de "buses")
+        palabras_comercio = [w for w in re.split(r"[\s\-_/,]+", c_lower) if len(w) >= 4]
+        for pw in palabras_input:
+            for cw in palabras_comercio:
+                if cw.startswith(pw) or pw.startswith(cw):
+                    return comercio
+
+    return nombre
+
+
 def historial_comercio(comercio: str) -> dict:
     """
     Busca gastos previos del mismo comercio y devuelve la categoría y medio de pago más frecuentes.
+    Normaliza el nombre del comercio contra los conocidos antes de buscar.
     Útil para auto-categorizar sin preguntarle al usuario.
     """
     from collections import Counter
 
-    gastos = queries.obtener_gastos({"busqueda": comercio})
+    comercio_normalizado = _normalizar_comercio(comercio)
+    if comercio_normalizado != comercio:
+        logger.info("historial_comercio: '%s' normalizado a '%s'", comercio, comercio_normalizado)
+
+    gastos = queries.obtener_gastos({"busqueda": comercio_normalizado})
 
     if not gastos:
-        return {"encontrado": False, "comercio": comercio}
+        return {"encontrado": False, "comercio": comercio_normalizado}
 
     categorias = Counter(g["categoria"] for g in gastos if g.get("categoria"))
     medios = Counter(g["medio_pago"] for g in gastos if g.get("medio_pago"))
 
     return {
         "encontrado": True,
-        "comercio": comercio,
+        "comercio": comercio_normalizado,
         "cantidad_gastos": len(gastos),
         "categoria_mas_frecuente": categorias.most_common(1)[0][0] if categorias else None,
         "medio_pago_mas_frecuente": medios.most_common(1)[0][0] if medios else None,

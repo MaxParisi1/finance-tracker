@@ -144,13 +144,16 @@ def _enriquecer_prisma(parsed: dict) -> dict:
     comercio = parsed["comercio"]
 
     # Intento 1: historial local (gratis)
-    hist = historial_comercio(comercio)
-    if hist.get("encontrado") and hist.get("categoria_mas_frecuente"):
-        return {
-            "categoria": hist["categoria_mas_frecuente"],
-            "descripcion": comercio,
-            "notas": None,
-        }
+    try:
+        hist = historial_comercio(comercio)
+        if hist.get("encontrado") and hist.get("categoria_mas_frecuente"):
+            return {
+                "categoria": hist["categoria_mas_frecuente"],
+                "descripcion": comercio,
+                "notas": None,
+            }
+    except Exception:
+        logger.warning("historial_comercio falló para '%s', continuando con Gemini", comercio)
 
     # Intento 2: Gemini con contexto completo — aprovechamos el call para todo
     categorias = [c["nombre"] for c in obtener_categorias_activas()]
@@ -307,7 +310,7 @@ async def poll_visa_once(bot, chat_id: int) -> None:
                 f"• *{comercio_esc}*\n"
                 f"• {moneda_sym}{parsed['monto']:,.2f} · {medio_pago.replace('_', ' ')}\n"
                 f"• Tarjeta: {_escape_md(tarjeta_nombre)}\n"
-                f"• Categoría: {categoria}\n"
+                f"• Categoría: {enriquecido['categoria']}\n"
                 f"• Fecha: {parsed['fecha']}"
             )
             if pendiente:

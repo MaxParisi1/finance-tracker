@@ -87,7 +87,6 @@ def obtener_comercios() -> list[str]:
         client.table("gastos")
         .select("comercio")
         .is_("deleted_at", "null")
-        .not_("comercio", "is", None)
         .execute()
     )
     unique = sorted({r["comercio"] for r in res.data if r.get("comercio")})

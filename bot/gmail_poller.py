@@ -13,7 +13,7 @@ from google.genai import types
 
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
 from bot.gemini_client import generate_with_fallback
-from bot.tools.gastos import guardar_gasto
+from bot.tools.gastos import guardar_gasto, historial_comercio
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
 from bot.db.queries import obtener_categorias_activas
 
@@ -21,14 +21,23 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 900  # 15 minutos
 
-# Patrón para emails de Prisma (Visa): extrae monto, comercio, fecha y sufijo de tarjeta
+# Patrón para emails de Prisma (Visa).
+# Ancla en "$ monto en el establecimiento" para ser agnóstico al tipo
+# ("consumo", "débito automático", etc.)
 _PRISMA_RE = re.compile(
-    r"consumo\s+de\s+\$\s*([\d.,]+)"         # monto
-    r".*?establecimiento\s+(.+?)\s+,"          # comercio (Prisma separa con ' , ')
-    r".*?el\s+d[ií]a\s+(\d{2}/\d{2}/\d{4})"  # fecha DD/MM/YYYY
-    r".*?finalizada\s+en\s+(\d{4})",          # sufijo
+    r"\$\s*([\d.,]+)\s+en\s+el\s+establecimiento\s+(.+?)\s+,"  # monto + comercio
+    r".*?el\s+d[ií]a\s+(\d{2}/\d{2}/\d{4})"                   # fecha DD/MM/YYYY
+    r".*?finalizada\s+en\s+(\d{4})",                            # sufijo
     re.IGNORECASE | re.DOTALL,
 )
+
+# Palabras que indican que la transacción fue rechazada y no debe registrarse
+_PRISMA_DENIED_KEYWORDS = ("denegad", "fallid", "no pudo ser procesad", "fue rechazad")
+
+
+def _is_prisma_denied(body: str) -> bool:
+    lower = body.lower()
+    return any(kw in lower for kw in _PRISMA_DENIED_KEYWORDS)
 
 
 def _parse_monto_argentino(raw: str) -> float:
@@ -39,12 +48,23 @@ def _parse_monto_argentino(raw: str) -> float:
 def _parse_prisma_email(email: dict) -> dict | None:
     """
     Parsea un email de notificación Prisma/Visa con regex.
-    Devuelve los campos estructurados o None si no matchea.
+    Retorna None con reason="denied" si la transacción fue rechazada.
+    Retorna None con reason="no_match" si el formato no reconoce.
+    Retorna el dict de campos si es una transacción válida.
     """
     body = email.get("body", "")
+
+    if _is_prisma_denied(body):
+        logger.info("Email Prisma ignorado (transacción denegada): %s", email.get("subject"))
+        return {"_denied": True}
+
     match = _PRISMA_RE.search(body)
     if not match:
-        logger.warning("Email de Consumos_visa no matchó el patrón Prisma: %s", email.get("subject"))
+        logger.warning(
+            "Email de Consumos_visa no matchó el patrón Prisma: %s | body[:300]: %r",
+            email.get("subject"),
+            body[:300],
+        )
         return None
 
     monto_raw, comercio, fecha_raw, sufijo = match.groups()
@@ -114,13 +134,43 @@ Cuerpo:
         return None
 
 
-def _get_categoria_with_gemini(comercio: str) -> str:
-    """Pide a Gemini solo la categoría para un comercio dado."""
-    categorias = [c["nombre"] for c in obtener_categorias_activas()]
-    categorias_str = ", ".join(categorias) if categorias else "otros"
+def _enriquecer_prisma(parsed: dict) -> dict:
+    """
+    Enriquece los datos parseados de un email Prisma con campos que requieren inteligencia.
+    Primero intenta con el historial local (sin costo). Si el comercio es nuevo, llama a Gemini
+    para obtener categoria, descripcion y notas en un único request.
+    Devuelve un dict con: categoria, descripcion, notas.
+    """
+    comercio = parsed["comercio"]
 
-    prompt = f"""Para el comercio "{comercio}", elegí la categoría más apropiada de esta lista: {categorias_str}.
-Respondé SOLO con un JSON: {{"categoria": "nombre exacto de la categoría"}}"""
+    # Intento 1: historial local (gratis)
+    hist = historial_comercio(comercio)
+    if hist.get("encontrado") and hist.get("categoria_mas_frecuente"):
+        return {
+            "categoria": hist["categoria_mas_frecuente"],
+            "descripcion": comercio,
+            "notas": None,
+        }
+
+    # Intento 2: Gemini con contexto completo — aprovechamos el call para todo
+    categorias = [c["nombre"] for c in obtener_categorias_activas()]
+    categorias_str = ", ".join(categorias) if categorias else "Otros"
+
+    prompt = f"""Analizá este consumo con tarjeta Visa y completá los campos faltantes.
+
+Datos ya conocidos:
+- Comercio: {comercio}
+- Monto: {parsed['monto']} {parsed['moneda']}
+- Fecha: {parsed['fecha']}
+
+Respondé SOLO con un JSON:
+{{
+  "categoria": "categoría de la lista",
+  "descripcion": "descripción clara y concisa del gasto (ej: 'Almuerzo en El Chulenguito')",
+  "notas": "dato útil si aplica, o null (ej: 'débito automático', 'peaje', etc.)"
+}}
+
+Categorías válidas: {categorias_str}."""
 
     try:
         response = generate_with_fallback(
@@ -129,9 +179,14 @@ Respondé SOLO con un JSON: {{"categoria": "nombre exacto de la categoría"}}"""
             config=types.GenerateContentConfig(response_mime_type="application/json"),
         )
         data = json.loads(response.text)
-        return data.get("categoria", "Otros")
+        return {
+            "categoria": data.get("categoria", "Otros"),
+            "descripcion": data.get("descripcion") or comercio,
+            "notas": data.get("notas") or None,
+        }
     except Exception:
-        return "Otros"
+        logger.warning("Gemini falló al enriquecer email Prisma de %s", comercio)
+        return {"categoria": "Otros", "descripcion": comercio, "notas": None}
 
 
 def _escape_md(text: str) -> str:
@@ -200,7 +255,23 @@ async def poll_visa_once(bot, chat_id: int) -> None:
         try:
             parsed = await asyncio.to_thread(_parse_prisma_email, email)
 
-            if not parsed:
+            if parsed is None:
+                # Formato desconocido: notificar y NO marcar como leído para revisión manual
+                subject = _escape_md(email.get("subject", "(sin asunto)"))
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"⚠️ *Email Visa sin parsear*\n"
+                        f"No reconocí el formato de un email en Consumos\\_visa.\n"
+                        f"• Asunto: {subject}\n"
+                        f"Revisalo manualmente en Gmail."
+                    ),
+                    parse_mode="Markdown",
+                )
+                continue
+
+            if parsed.get("_denied"):
+                # Transacción denegada: marcar como leído y seguir
                 await asyncio.to_thread(mark_as_read, email["id"])
                 continue
 
@@ -210,17 +281,18 @@ async def poll_visa_once(bot, chat_id: int) -> None:
             medio_pago, tarjeta_row = await asyncio.to_thread(resolver_medio_pago, sufijo, moneda)
             tarjeta_nombre = nombre_tarjeta(tarjeta_row)
 
-            categoria = await asyncio.to_thread(_get_categoria_with_gemini, parsed["comercio"])
+            enriquecido = await asyncio.to_thread(_enriquecer_prisma, parsed)
 
             await asyncio.to_thread(
                 guardar_gasto,
-                descripcion=parsed["comercio"],
+                descripcion=enriquecido["descripcion"],
                 monto=parsed["monto"],
                 moneda=moneda,
-                categoria=categoria,
+                categoria=enriquecido["categoria"],
                 medio_pago=medio_pago,
                 fecha=parsed["fecha"],
                 comercio=parsed["comercio"],
+                notas=enriquecido["notas"],
                 fuente="gmail_visa",
                 tarjeta=tarjeta_nombre,
             )

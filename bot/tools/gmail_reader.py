@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 LABEL_NAME = "Consumos"
+LABEL_NAME_VISA = "Consumos_visa"
 
 
 def _get_credentials() -> Credentials:
@@ -31,19 +32,19 @@ def _get_credentials() -> Credentials:
     return creds
 
 
-def get_unread_bank_emails() -> list[dict]:
-    """Devuelve los emails no leídos de la etiqueta Consumos."""
+def get_unread_bank_emails(label_name: str = LABEL_NAME) -> list[dict]:
+    """Devuelve los emails no leídos de la etiqueta indicada."""
     creds = _get_credentials()
     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
     labels_result = service.users().labels().list(userId="me").execute()
     label_id = next(
-        (l["id"] for l in labels_result.get("labels", []) if l["name"].lower() == LABEL_NAME.lower()),
+        (l["id"] for l in labels_result.get("labels", []) if l["name"].lower() == label_name.lower()),
         None,
     )
 
     if not label_id:
-        logger.warning(f"Etiqueta '{LABEL_NAME}' no encontrada en Gmail")
+        logger.warning(f"Etiqueta '{label_name}' no encontrada en Gmail")
         return []
 
     result = service.users().messages().list(

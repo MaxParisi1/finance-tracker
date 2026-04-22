@@ -1,27 +1,71 @@
 """
-Tarea en background: consulta Gmail cada 5 minutos buscando emails bancarios.
-Parsea la transacción con Gemini y la guarda en Supabase automáticamente.
+Tarea en background: consulta Gmail cada 15 minutos buscando emails bancarios.
+- Etiqueta "Consumos": emails genéricos (BBVA, Mastercard, etc.) parseados con Gemini.
+- Etiqueta "Consumos_visa": notificaciones Prisma/Visa; medio_pago resuelto por sufijo de tarjeta.
 """
 
 import asyncio
 import json
 import logging
-import os
+import re
 
 from google.genai import types
 
-from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read
+from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
 from bot.gemini_client import generate_with_fallback
 from bot.tools.gastos import guardar_gasto
+from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
 from bot.db.queries import obtener_categorias_activas
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 900  # 15 minutos
 
+# Patrón para emails de Prisma (Visa): extrae monto, comercio, fecha y sufijo de tarjeta
+_PRISMA_RE = re.compile(
+    r"consumo\s+de\s+\$\s*([\d.,]+)"         # monto
+    r".*?establecimiento\s+(.+?)\s+,"          # comercio (Prisma separa con ' , ')
+    r".*?el\s+d[ií]a\s+(\d{2}/\d{2}/\d{4})"  # fecha DD/MM/YYYY
+    r".*?finalizada\s+en\s+(\d{4})",          # sufijo
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_monto_argentino(raw: str) -> float:
+    """Convierte '14.500,00' → 14500.0"""
+    return float(raw.replace(".", "").replace(",", "."))
+
+
+def _parse_prisma_email(email: dict) -> dict | None:
+    """
+    Parsea un email de notificación Prisma/Visa con regex.
+    Devuelve los campos estructurados o None si no matchea.
+    """
+    body = email.get("body", "")
+    match = _PRISMA_RE.search(body)
+    if not match:
+        logger.warning("Email de Consumos_visa no matchó el patrón Prisma: %s", email.get("subject"))
+        return None
+
+    monto_raw, comercio, fecha_raw, sufijo = match.groups()
+    monto = _parse_monto_argentino(monto_raw)
+
+    dia, mes, anio = fecha_raw.split("/")
+    fecha = f"{anio}-{mes}-{dia}"
+
+    moneda = "USD" if "usd" in body.lower() or "u$s" in body.lower() else "ARS"
+
+    return {
+        "monto": monto,
+        "moneda": moneda,
+        "comercio": comercio.strip().title(),
+        "fecha": fecha,
+        "sufijo": sufijo,
+    }
+
 
 def _parse_email_with_gemini(email: dict) -> dict | None:
-    """Usa Gemini para extraer datos de transacción de un email bancario."""
+    """Usa Gemini para extraer datos de transacción de un email bancario genérico."""
     categorias = [c["nombre"] for c in obtener_categorias_activas()]
     categorias_str = ", ".join(categorias) if categorias else "otros"
 
@@ -70,12 +114,40 @@ Cuerpo:
         return None
 
 
+def _get_categoria_with_gemini(comercio: str) -> str:
+    """Pide a Gemini solo la categoría para un comercio dado."""
+    categorias = [c["nombre"] for c in obtener_categorias_activas()]
+    categorias_str = ", ".join(categorias) if categorias else "otros"
+
+    prompt = f"""Para el comercio "{comercio}", elegí la categoría más apropiada de esta lista: {categorias_str}.
+Respondé SOLO con un JSON: {{"categoria": "nombre exacto de la categoría"}}"""
+
+    try:
+        response = generate_with_fallback(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        data = json.loads(response.text)
+        return data.get("categoria", "Otros")
+    except Exception:
+        return "Otros"
+
+
+def _escape_md(text: str) -> str:
+    """Escapa caracteres especiales de Markdown de Telegram."""
+    text = text.replace("*", " ")
+    for ch in ("_", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text.strip()
+
+
 async def poll_gmail_once(bot, chat_id: int) -> None:
-    """Revisa Gmail una vez y procesa los emails nuevos."""
+    """Revisa la etiqueta Consumos (emails genéricos) y procesa los nuevos."""
     try:
         emails = await asyncio.to_thread(get_unread_bank_emails)
     except Exception:
-        logger.exception("Error al consultar Gmail")
+        logger.exception("Error al consultar Gmail (Consumos)")
         return
 
     for email in emails:
@@ -86,7 +158,7 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
                 await asyncio.to_thread(mark_as_read, email["id"])
                 continue
 
-            resultado = await asyncio.to_thread(
+            await asyncio.to_thread(
                 guardar_gasto,
                 descripcion=data.get("descripcion", "Pago con tarjeta"),
                 monto=float(data["monto"]),
@@ -101,21 +173,14 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
 
             await asyncio.to_thread(mark_as_read, email["id"])
 
-            def _escape_md(text: str) -> str:
-                """Limpia y escapa caracteres especiales de Markdown de Telegram."""
-                text = text.replace("*", " ")  # separador de procesador de pagos
-                for ch in ("_", "`", "["):
-                    text = text.replace(ch, f"\\{ch}")
-                return text.strip()
-
             moneda_sym = "USD " if data.get("moneda") == "USD" else "$"
-            comercio = _escape_md(str(data.get("comercio") or data.get("descripcion") or ""))
+            comercio_esc = _escape_md(str(data.get("comercio") or data.get("descripcion") or ""))
             msg = (
                 f"\U0001f4e7 *Gasto auto-registrado desde email:*\n"
-                f"\u2022 *{comercio}*\n"
-                f"\u2022 {moneda_sym}{float(data['monto']):,.2f} \u00b7 {data.get('medio_pago', '').replace('_', ' ')}\n"
-                f"\u2022 Categoría: {data.get('categoria')}\n"
-                f"\u2022 Fecha: {data.get('fecha')}"
+                f"• *{comercio_esc}*\n"
+                f"• {moneda_sym}{float(data['monto']):,.2f} · {data.get('medio_pago', '').replace('_', ' ')}\n"
+                f"• Categoría: {data.get('categoria')}\n"
+                f"• Fecha: {data.get('fecha')}"
             )
             await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
 
@@ -123,9 +188,74 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
             logger.exception(f"Error procesando email {email['id']}")
 
 
+async def poll_visa_once(bot, chat_id: int) -> None:
+    """Revisa la etiqueta Consumos_visa (notificaciones Prisma) y procesa los nuevos."""
+    try:
+        emails = await asyncio.to_thread(get_unread_bank_emails, LABEL_NAME_VISA)
+    except Exception:
+        logger.exception("Error al consultar Gmail (Consumos_visa)")
+        return
+
+    for email in emails:
+        try:
+            parsed = await asyncio.to_thread(_parse_prisma_email, email)
+
+            if not parsed:
+                await asyncio.to_thread(mark_as_read, email["id"])
+                continue
+
+            sufijo = parsed["sufijo"]
+            moneda = parsed["moneda"]
+
+            medio_pago, tarjeta_row = await asyncio.to_thread(resolver_medio_pago, sufijo, moneda)
+            tarjeta_nombre = nombre_tarjeta(tarjeta_row)
+
+            categoria = await asyncio.to_thread(_get_categoria_with_gemini, parsed["comercio"])
+
+            await asyncio.to_thread(
+                guardar_gasto,
+                descripcion=parsed["comercio"],
+                monto=parsed["monto"],
+                moneda=moneda,
+                categoria=categoria,
+                medio_pago=medio_pago,
+                fecha=parsed["fecha"],
+                comercio=parsed["comercio"],
+                fuente="gmail_visa",
+                tarjeta=tarjeta_nombre,
+            )
+
+            await asyncio.to_thread(mark_as_read, email["id"])
+
+            pendiente = tarjeta_row.get("pendiente_clasificacion", False)
+            moneda_sym = "USD " if moneda == "USD" else "$"
+            comercio_esc = _escape_md(parsed["comercio"])
+            msg = (
+                f"\U0001f4e7 *Gasto Visa auto-registrado:*\n"
+                f"• *{comercio_esc}*\n"
+                f"• {moneda_sym}{parsed['monto']:,.2f} · {medio_pago.replace('_', ' ')}\n"
+                f"• Tarjeta: {_escape_md(tarjeta_nombre)}\n"
+                f"• Categoría: {categoria}\n"
+                f"• Fecha: {parsed['fecha']}"
+            )
+            if pendiente:
+                msg += f"\n⚠️ Tarjeta {sufijo} sin clasificar (se usó crédito por default)"
+            await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+
+        except Exception:
+            logger.exception(f"Error procesando email Visa {email['id']}")
+
+
 async def start_gmail_polling(bot, chat_id: int) -> None:
-    """Loop eterno de polling de Gmail."""
-    logger.info("Gmail poller iniciado (intervalo: 5 minutos)")
+    """Arranca los dos loops de polling en paralelo."""
+    logger.info("Gmail pollers iniciados (intervalo: %ds)", POLL_INTERVAL)
+    await asyncio.gather(
+        _loop_poll(bot, chat_id, poll_gmail_once),
+        _loop_poll(bot, chat_id, poll_visa_once),
+    )
+
+
+async def _loop_poll(bot, chat_id: int, poll_fn) -> None:
     while True:
-        await poll_gmail_once(bot, chat_id)
+        await poll_fn(bot, chat_id)
         await asyncio.sleep(POLL_INTERVAL)

@@ -316,3 +316,47 @@ def contar_archivos_por_gastos(gasto_ids: list[str]) -> dict[str, int]:
         gid = row["gasto_id"]
         conteo[gid] = conteo.get(gid, 0) + 1
     return conteo
+
+
+# ──────────────────────────────────────────────
+# Tarjetas
+# ──────────────────────────────────────────────
+
+def buscar_tarjeta_por_sufijo(sufijo: str) -> dict | None:
+    client = get_client()
+    res = (
+        client.table("tarjetas")
+        .select("*")
+        .eq("sufijo", sufijo)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def insertar_tarjeta(tarjeta: dict) -> dict:
+    client = get_client()
+    res = client.table("tarjetas").insert(tarjeta).execute()
+    logger.info("Tarjeta creada sufijo=%s tipo=%s", tarjeta.get("sufijo"), tarjeta.get("tipo"))
+    return res.data[0]
+
+
+def listar_tarjetas() -> list[dict]:
+    client = get_client()
+    res = (
+        client.table("tarjetas")
+        .select("*")
+        .order("created_at")
+        .execute()
+    )
+    return res.data
+
+
+def actualizar_tarjeta(sufijo: str, campos: dict) -> dict:
+    client = get_client()
+    res = (
+        client.table("tarjetas")
+        .update(campos)
+        .eq("sufijo", sufijo)
+        .execute()
+    )
+    return res.data[0] if res.data else {}

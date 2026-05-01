@@ -28,7 +28,7 @@ from bot.tools.media_processor import (
     audio_a_mensaje,
     comprobante_a_mensaje,
 )
-from bot.tools.comprobantes import set_archivo_pendiente
+from bot.tools.comprobantes import set_archivo_pendiente, preview_filename
 from bot.tools.bbva_parser import importar_pdf_bbva
 from bot.db.queries import obtener_gastos, cargar_historial_bot, guardar_historial_bot
 
@@ -186,6 +186,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             datos = analizar_comprobante(bytes(img_bytes), mime_type="image/jpeg")
             set_archivo_pendiente(chat_id, bytes(img_bytes), "image/jpeg", datos)
             mensaje_interno = comprobante_a_mensaje(datos)
+            mensaje_interno += f"\n- Nombre de archivo sugerido: `{preview_filename(datos, 'image/jpeg')}` (el usuario puede cambiarlo antes de confirmar)."
             if caption:
                 mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
         else:
@@ -347,6 +348,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             datos = analizar_comprobante(bytes(file_bytes), mime_type=mime_type)
             set_archivo_pendiente(chat_id, bytes(file_bytes), mime_type, datos)
             mensaje_interno = comprobante_a_mensaje(datos)
+            mensaje_interno += f"\n- Nombre de archivo sugerido: `{preview_filename(datos, mime_type)}` (el usuario puede cambiarlo antes de confirmar)."
             if caption:
                 mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
         except Exception:

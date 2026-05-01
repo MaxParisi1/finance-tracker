@@ -254,6 +254,12 @@ def obtener_archivos_drive(filtros: dict) -> list[dict]:
     return res.data
 
 
+def sincronizar_fecha_archivos(gasto_id: str, fecha: str) -> None:
+    """Actualiza la fecha de todos los archivos_drive vinculados a un gasto."""
+    client = get_client()
+    client.table("archivos_drive").update({"fecha": fecha}).eq("gasto_id", gasto_id).execute()
+
+
 def vincular_archivo_a_gasto(archivo_id: str, gasto_id: str) -> dict:
     """Vincula un archivo de Drive con un gasto existente.
 

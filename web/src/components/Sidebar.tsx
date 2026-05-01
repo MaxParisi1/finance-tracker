@@ -15,6 +15,7 @@ import {
   Sun,
   Moon,
   Layers,
+  History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AnimatedGradientText } from '@/components/magicui/animated-gradient-text'
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: '/analytics',   label: 'Analíticas',    icon: BarChart3,       gradient: 'from-purple-500 to-pink-600' },
   { href: '/recurrentes', label: 'Recurrentes',   icon: RefreshCw,       gradient: 'from-pink-500 to-rose-600' },
   { href: '/cuotas',      label: 'Cuotas',         icon: Layers,          gradient: 'from-rose-500 to-orange-500' },
+  { href: '/historico',  label: 'Histórico',      icon: History,         gradient: 'from-orange-500 to-amber-500' },
 ]
 
 export default function Sidebar() {

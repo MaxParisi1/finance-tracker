@@ -56,8 +56,16 @@ export async function updateGastoAction(
     .eq('id', id)
 
   if (error) throw new Error(error.message)
+
+  // Sincronizar fecha de comprobantes vinculados (best-effort)
+  await supabase
+    .from('archivos_drive')
+    .update({ fecha: fields.fecha })
+    .eq('gasto_id', id)
+
   revalidatePath('/gastos')
   revalidatePath('/dashboard')
+  revalidatePath('/comprobantes')
 }
 
 export async function deleteGastoAction(id: string) {

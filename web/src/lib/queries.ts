@@ -470,28 +470,65 @@ export async function getArchivosDrive(filtros?: {
   tipo?: string
 }): Promise<ArchivoDrive[]> {
   const supabase = getSupabaseServer()
-  let q = supabase.from('archivos_drive').select('*')
 
-  if (filtros?.mes && filtros?.anio) {
-    const { desde, hasta } = monthRange(filtros.mes, filtros.anio)
-    q = q.gte('fecha', desde).lt('fecha', hasta)
-  } else if (filtros?.anio) {
-    q = q.gte('fecha', `${filtros.anio}-01-01`).lt('fecha', `${filtros.anio + 1}-01-01`)
-  }
-
-  if (filtros?.comercio) {
-    q = q.ilike('comercio', `%${filtros.comercio}%`)
-  }
-  if (filtros?.categoria) {
-    q = q.eq('categoria', filtros.categoria)
-  }
-  if (filtros?.tipo) {
-    q = q.eq('tipo', filtros.tipo)
+  function applyFilters(q: any) {
+    if (filtros?.comercio) q = q.ilike('comercio', `%${filtros.comercio}%`)
+    if (filtros?.categoria) q = q.eq('categoria', filtros.categoria)
+    if (filtros?.tipo) q = q.eq('tipo', filtros.tipo)
+    return q
   }
 
-  const { data, error } = await q.order('fecha', { ascending: false })
-  if (error) throw error
-  return data ?? []
+  // Sin filtro de fecha: devolver todos con los filtros de metadata
+  if (!filtros?.mes || !filtros?.anio) {
+    const range = filtros?.anio
+      ? { desde: `${filtros.anio}-01-01`, hasta: `${filtros.anio + 1}-01-01` }
+      : null
+    let q = supabase.from('archivos_drive').select('*')
+    if (range) q = q.gte('fecha', range.desde).lt('fecha', range.hasta)
+    q = applyFilters(q)
+    const { data, error } = await q.order('fecha', { ascending: false })
+    if (error) throw error
+    return data ?? []
+  }
+
+  const { desde, hasta } = monthRange(filtros.mes, filtros.anio)
+
+  // Query 1: archivos cuya propia fecha cae en el mes
+  const q1 = applyFilters(
+    supabase.from('archivos_drive').select('*').gte('fecha', desde).lt('fecha', hasta)
+  )
+
+  // Query 2: archivos vinculados a gastos cuya fecha cae en el mes
+  // (cubre el caso donde el gasto fue editado a un mes diferente al de subida)
+  const { data: gastosDelMes } = await supabase
+    .from('gastos')
+    .select('id')
+    .gte('fecha', desde)
+    .lt('fecha', hasta)
+    .is('deleted_at', null)
+
+  const gastoIds = (gastosDelMes ?? []).map((g: { id: string }) => g.id)
+
+  const q2Promise = gastoIds.length > 0
+    ? applyFilters(supabase.from('archivos_drive').select('*').in('gasto_id', gastoIds))
+        .then((r: any) => r.data ?? [])
+    : Promise.resolve([] as ArchivoDrive[])
+
+  const [r1, r2] = await Promise.all([
+    q1.then((r: any) => { if (r.error) throw r.error; return r.data ?? [] }),
+    q2Promise,
+  ])
+
+  // Merge deduplicando por id, ordenar por fecha descendente
+  const seen = new Set<string>()
+  const merged: ArchivoDrive[] = []
+  for (const a of [...r1, ...r2]) {
+    if (!seen.has(a.id)) {
+      seen.add(a.id)
+      merged.push(a)
+    }
+  }
+  return merged.sort((a, b) => b.fecha.localeCompare(a.fecha))
 }
 
 export async function getArchivosPorGasto(gastoId: string): Promise<ArchivoDrive[]> {
@@ -532,6 +569,66 @@ export async function getPlanesCuotaActivos(): Promise<PlanCuota[]> {
 }
 
 // ──────────────────────────────────────────────
+
+// ──────────────────────────────────────────────
+// Histórico multi-mes
+// ──────────────────────────────────────────────
+
+export interface HistoricoMes {
+  mes: number
+  anio: number
+  label: string
+  total_ars: number
+  cantidad: number
+}
+
+export async function getGastosHistorico(filtros: {
+  desde: string
+  hasta: string
+  busqueda?: string
+  categoria?: string
+  medio_pago?: string
+}): Promise<{ meses: HistoricoMes[]; gastos: Gasto[] }> {
+  const supabase = getSupabaseServer()
+
+  let q = supabase
+    .from('gastos')
+    .select('*')
+    .is('deleted_at', null)
+    .gte('fecha', filtros.desde)
+    .lt('fecha', filtros.hasta)
+    .order('fecha', { ascending: false })
+
+  if (filtros.busqueda) {
+    q = q.or(`descripcion.ilike.%${filtros.busqueda}%,comercio.ilike.%${filtros.busqueda}%`)
+  }
+  if (filtros.categoria) q = q.eq('categoria', filtros.categoria)
+  if (filtros.medio_pago) q = q.eq('medio_pago', filtros.medio_pago)
+
+  const { data, error } = await q
+  if (error) throw error
+  const gastos: Gasto[] = data ?? []
+
+  const mesMap = new Map<string, HistoricoMes>()
+  for (const g of gastos) {
+    const parts = g.fecha.split('-')
+    const anio = parseInt(parts[0])
+    const mes = parseInt(parts[1])
+    const key = `${anio}-${mes}`
+    if (!mesMap.has(key)) {
+      mesMap.set(key, { mes, anio, label: monthLabel(mes, anio), total_ars: 0, cantidad: 0 })
+    }
+    const entry = mesMap.get(key)!
+    entry.total_ars += g.monto_ars ?? 0
+    entry.cantidad += 1
+  }
+
+  const meses = Array.from(mesMap.values())
+    .map(m => ({ ...m, total_ars: Math.round(m.total_ars) }))
+    .sort((a, b) => a.anio !== b.anio ? a.anio - b.anio : a.mes - b.mes)
+
+  return { meses, gastos }
+}
 
 export async function contarArchivosPorGastos(gastoIds: string[]): Promise<Record<string, number>> {
   if (gastoIds.length === 0) return {}

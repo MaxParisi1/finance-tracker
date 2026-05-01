@@ -8,9 +8,10 @@ export async function subirYVincularArchivoAction(formData: FormData) {
   const file = formData.get('file') as File | null
   const gastoId = formData.get('gastoId') as string
   const comercio = (formData.get('comercio') as string) || 'Sin comercio'
-  const fecha = formData.get('fecha') as string       // YYYY-MM-DD
-  const tipo = formData.get('tipo') as string          // factura | comprobante | ticket | recibo
+  const fecha = formData.get('fecha') as string
+  const tipo = formData.get('tipo') as string
   const categoria = (formData.get('categoria') as string) || null
+  const nombreArchivo = (formData.get('nombreArchivo') as string) || undefined
 
   if (!file || !gastoId || !fecha || !tipo) {
     throw new Error('Faltan campos requeridos')
@@ -26,6 +27,7 @@ export async function subirYVincularArchivoAction(formData: FormData) {
       comercio,
       fecha,
       tipo,
+      nombreArchivo,
     })
 
   const supabase = getSupabaseServer()

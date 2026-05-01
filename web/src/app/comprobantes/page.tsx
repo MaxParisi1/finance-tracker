@@ -34,7 +34,7 @@ export default async function ComprobantesPage({
                 {monthLabel(mes, anio)} · {archivos.length} archivos en Drive
               </p>
             </div>
-            <GastosFilter mes={mes} anio={anio} />
+            <GastosFilter mes={mes} anio={anio} basePath="/comprobantes" />
           </div>
 
           <ComprobantesView

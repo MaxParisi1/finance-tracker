@@ -95,8 +95,9 @@ export async function subirArchivoDrive(params: {
   fileBuffer: Buffer
   mimeType: string
   comercio: string
-  fecha: string   // YYYY-MM-DD
-  tipo: string    // factura | comprobante | ticket | recibo | resumen
+  fecha: string
+  tipo: string
+  nombreArchivo?: string
 }): Promise<UploadResult> {
   const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID
   if (!rootFolderId) throw new Error('Falta GOOGLE_DRIVE_ROOT_FOLDER_ID')
@@ -115,10 +116,15 @@ export async function subirArchivoDrive(params: {
   const mesId = await getOrCreateFolder(drive, mesStr, anioId)
   const folderPath = `${carpetaComercio}/${anio}/${mesStr}`
 
-  // Nombre de archivo: YYYY-MM-DD_comercio_tipo.ext
   const ext = getExtension(params.mimeType)
-  const comercioNorm = normalizarComercio(params.comercio)
-  const fileName = `${params.fecha}_${comercioNorm}_${params.tipo.toLowerCase()}.${ext}`
+  let fileName: string
+  if (params.nombreArchivo) {
+    const nombre = params.nombreArchivo.trim()
+    fileName = nombre.includes('.') ? nombre : `${nombre}.${ext}`
+  } else {
+    const comercioNorm = normalizarComercio(params.comercio)
+    fileName = `${params.fecha}_${comercioNorm}_${params.tipo.toLowerCase()}.${ext}`
+  }
 
   // Subir archivo
   const stream = Readable.from(params.fileBuffer)

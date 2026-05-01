@@ -4,6 +4,8 @@ Estas funciones son llamadas como tools por el agente vía function calling.
 """
 
 import logging
+import re
+import unicodedata
 from datetime import date
 
 from bot.db import queries
@@ -34,7 +36,6 @@ def get_archivo_pendiente(chat_id: int) -> dict | None:
 
 
 def _extension_from_mime(mime_type: str) -> str:
-    """Obtiene extensión de archivo a partir del MIME type."""
     mime_map = {
         "application/pdf": "pdf",
         "image/jpeg": "jpg",
@@ -42,6 +43,26 @@ def _extension_from_mime(mime_type: str) -> str:
         "image/webp": "webp",
     }
     return mime_map.get(mime_type, "bin")
+
+
+def _normalizar_para_filename(nombre: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", nombre)
+    sin_acentos = "".join(c for c in nfkd if not unicodedata.combining(c))
+    norm = re.sub(r"[\s.]+", "_", sin_acentos.lower().strip())
+    return re.sub(r"[^a-z0-9_\-]", "", norm) or "desconocido"
+
+
+def preview_filename(datos: dict, mime_type: str) -> str:
+    """Calcula el nombre de archivo que usará subir_comprobante_a_drive con los datos actuales."""
+    comercio = datos.get("comercio") or "desconocido"
+    fecha_str = datos.get("fecha") or date.today().isoformat()
+    tipo = (datos.get("tipo") or "comprobante").lower().strip()
+    extension = _extension_from_mime(mime_type)
+    try:
+        fecha_doc = date.fromisoformat(fecha_str)
+    except ValueError:
+        fecha_doc = date.today()
+    return f"{fecha_doc.isoformat()}_{_normalizar_para_filename(comercio)}_{tipo}.{extension}"
 
 
 def subir_comprobante_a_drive(
@@ -52,6 +73,7 @@ def subir_comprobante_a_drive(
     categoria: str | None = None,
     monto: float | None = None,
     moneda: str | None = None,
+    nombre_archivo: str | None = None,
 ) -> dict:
     """
     Sube el archivo pendiente a Google Drive con la estructura organizada.
@@ -91,8 +113,14 @@ def subir_comprobante_a_drive(
     try:
         dm = get_drive_manager()
 
-        # Generar nombre de archivo
-        filename = dm.generate_filename(fecha_doc, comercio_final, tipo_final, extension)
+        # Generar nombre de archivo (o usar el personalizado si el usuario lo especificó)
+        if nombre_archivo:
+            nombre = nombre_archivo.strip()
+            if "." not in nombre.rsplit("/", 1)[-1]:
+                nombre = f"{nombre}.{extension}"
+            filename = nombre
+        else:
+            filename = dm.generate_filename(fecha_doc, comercio_final, tipo_final, extension)
 
         # Obtener carpeta destino
         folder_id, folder_path = dm.get_target_folder(comercio_final, fecha_doc)

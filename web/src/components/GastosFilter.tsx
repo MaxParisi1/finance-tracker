@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 interface GastosFilterProps {
   mes: number
   anio: number
+  basePath?: string
 }
 
 const selectClass = cn(
@@ -15,14 +16,14 @@ const selectClass = cn(
   'transition-colors text-foreground cursor-pointer'
 )
 
-export default function GastosFilter({ mes, anio }: GastosFilterProps) {
+export default function GastosFilter({ mes, anio, basePath = '/gastos' }: GastosFilterProps) {
   const router = useRouter()
 
   const currentYear = new Date().getFullYear()
   const years = [currentYear - 1, currentYear, currentYear + 1]
 
   function handleChange(newMes: number, newAnio: number) {
-    router.push(`/gastos?mes=${newMes}&anio=${newAnio}`)
+    router.push(`${basePath}?mes=${newMes}&anio=${newAnio}`)
   }
 
   return (

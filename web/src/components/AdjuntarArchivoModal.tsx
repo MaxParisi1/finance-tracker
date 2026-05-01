@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useRef, useState, useTransition, useEffect } from 'react'
 import { Upload, X, FileText, Image, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
@@ -42,7 +42,20 @@ export default function AdjuntarArchivoModal({
   const [fechaVal, setFechaVal] = useState(fecha)
   const [dragOver, setDragOver] = useState(false)
   const [done, setDone] = useState(false)
+  const [nombreArchivo, setNombreArchivo] = useState('')
+  const [nombreEditado, setNombreEditado] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (nombreEditado || !file || !fechaVal || !comercioVal) return
+    const ext = file.type === 'application/pdf' ? 'pdf'
+      : file.type === 'image/png' ? 'png'
+      : file.type === 'image/webp' ? 'webp'
+      : 'jpg'
+    const norm = comercioVal.normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().trim().replace(/[\s.]+/g, '_').replace(/[^a-z0-9_\-]/g, '')
+    setNombreArchivo(`${fechaVal}_${norm}_${tipo}.${ext}`)
+  }, [file, fechaVal, comercioVal, tipo, nombreEditado])
 
   function handleFile(f: File) {
     setFile(f)
@@ -75,6 +88,7 @@ export default function AdjuntarArchivoModal({
         fd.append('fecha', fechaVal)
         fd.append('tipo', tipo)
         if (categoria) fd.append('categoria', categoria)
+        if (nombreArchivo) fd.append('nombreArchivo', nombreArchivo)
 
         await subirYVincularArchivoAction(fd)
 
@@ -205,19 +219,30 @@ export default function AdjuntarArchivoModal({
             />
           </div>
 
-          {/* Nombre resultante */}
+          {/* Nombre resultante — editable */}
           {file && fechaVal && comercioVal && (
             <div className="rounded-lg bg-muted px-3 py-2.5">
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
-                Se guardará como
-              </p>
-              <p className="text-xs font-mono text-foreground break-all">
-                {fechaVal}_{comercioVal.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}_{tipo}.
-                {file.type === 'application/pdf' ? 'pdf'
-                  : file.type === 'image/png' ? 'png'
-                  : file.type === 'image/webp' ? 'webp'
-                  : 'jpg'}
-              </p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Se guardará como
+                </p>
+                {nombreEditado && (
+                  <button
+                    type="button"
+                    onClick={() => setNombreEditado(false)}
+                    className="text-[10px] text-primary hover:underline leading-none"
+                  >
+                    Restaurar
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={nombreArchivo}
+                onChange={e => { setNombreEditado(true); setNombreArchivo(e.target.value) }}
+                className="w-full bg-transparent text-xs font-mono text-foreground focus:outline-none focus:ring-0 break-all"
+                spellCheck={false}
+              />
             </div>
           )}
         </div>

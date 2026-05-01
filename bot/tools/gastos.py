@@ -227,7 +227,16 @@ def editar_gasto(gasto_id: str, campos_a_modificar: dict) -> dict:
             campos_a_modificar["tipo_cambio"] = 1.0
             campos_a_modificar["tipo_cambio_tipo"] = "n/a"
 
-    return queries.actualizar_gasto(gasto_id, campos_a_modificar)
+    resultado = queries.actualizar_gasto(gasto_id, campos_a_modificar)
+
+    # Si se modificó la fecha, sincronizar los comprobantes vinculados
+    if "fecha" in campos_a_modificar:
+        try:
+            queries.sincronizar_fecha_archivos(gasto_id, campos_a_modificar["fecha"])
+        except Exception:
+            logger.warning("No se pudo sincronizar fecha de archivos_drive para gasto %s", gasto_id)
+
+    return resultado
 
 
 def eliminar_gasto(gasto_id: str) -> dict:

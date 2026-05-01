@@ -8,7 +8,7 @@ import {
   CreditCard,
   FileText,
   BarChart3,
-  RefreshCw,
+  History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -17,7 +17,7 @@ const NAV_ITEMS = [
   { href: '/gastos',       label: 'Gastos',       icon: CreditCard,     gradient: 'rgba(139,92,246,0.20)' },
   { href: '/comprobantes', label: 'Archivos',     icon: FileText,       gradient: 'rgba(168,85,247,0.20)' },
   { href: '/analytics',   label: 'Analíticas',   icon: BarChart3,      gradient: 'rgba(217,70,239,0.20)' },
-  { href: '/recurrentes', label: 'Recurrentes',  icon: RefreshCw,      gradient: 'rgba(236,72,153,0.20)' },
+  { href: '/historico',   label: 'Histórico',    icon: History,        gradient: 'rgba(251,146,60,0.20)' },
 ]
 
 export default function BottomNav() {

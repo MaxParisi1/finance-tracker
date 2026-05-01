@@ -49,6 +49,10 @@ MODEL = "gemini-2.5-flash"
 # { chat_id: {"resultado": dict, "pdf_bytes": bytes} }
 _pdf_pendiente: dict[int, dict] = {}
 
+# Estado temporal del gasto pendiente de confirmación (en memoria, por chat_id)
+# { chat_id: {"tool": "guardar_gasto"|"guardar_multiples_gastos", "args": dict} }
+_gasto_pendiente: dict[int, dict] = {}
+
 
 def set_pdf_pendiente(chat_id: int, resultado: dict, pdf_bytes: bytes) -> None:
     _pdf_pendiente[chat_id] = {"resultado": resultado, "pdf_bytes": pdf_bytes}
@@ -94,12 +98,15 @@ _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="guardar_gasto",
         description=(
-            "Guarda un gasto en la base de datos. "
-            "SIEMPRE mostrar un resumen al usuario y esperar confirmación antes de llamar esta función."
+            "Registra un gasto. SIEMPRE llamar primero con dry_run=True para obtener el preview "
+            "y mostrárselo al usuario antes de confirmar. El sistema procesará la confirmación "
+            "automáticamente. Solo omitir dry_run como fallback si el usuario ya confirmó pero "
+            "el sistema no lo procesó."
         ),
         parameters=types.Schema(
             type="OBJECT",
             properties={
+                "dry_run":          types.Schema(type="BOOLEAN", description="True para registrar como pendiente y obtener preview. Usar SIEMPRE antes de pedir confirmación."),
                 "descripcion":      types.Schema(type="STRING", description="Descripción del gasto"),
                 "monto":            types.Schema(type="NUMBER", description="Monto en la moneda original"),
                 "moneda":           types.Schema(type="STRING", enum=["ARS", "USD"]),
@@ -125,13 +132,14 @@ _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="guardar_multiples_gastos",
         description=(
-            "Guarda varios gastos de una sola vez, tras recibir confirmación explícita del usuario. "
-            "Usá esta tool cuando el usuario menciona 2 o más gastos en el mismo mensaje. "
-            "SIEMPRE mostrar el listado completo y pedir confirmación antes de llamarla."
+            "Guarda varios gastos de una sola vez. Usá cuando el usuario menciona 2 o más gastos. "
+            "SIEMPRE llamar primero con dry_run=True para obtener el listado y mostrárselo al usuario. "
+            "El sistema procesará la confirmación automáticamente."
         ),
         parameters=types.Schema(
             type="OBJECT",
             properties={
+                "dry_run": types.Schema(type="BOOLEAN", description="True para registrar como pendiente y obtener preview. Usar SIEMPRE antes de pedir confirmación."),
                 "gastos": types.Schema(
                     type="ARRAY",
                     description="Lista de gastos a guardar. Cada elemento tiene los mismos campos que guardar_gasto.",
@@ -360,12 +368,13 @@ _TOOL_DECLARATIONS = [
         parameters=types.Schema(
             type="OBJECT",
             properties={
-                "comercio":  types.Schema(type="STRING", description="Nombre del comercio/emisor"),
-                "fecha":     types.Schema(type="STRING", description="Fecha del documento YYYY-MM-DD"),
-                "tipo":      types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
-                "categoria": types.Schema(type="STRING", description="Categoría: Servicios, Salud, Impuestos u Otros"),
-                "monto":     types.Schema(type="NUMBER", description="Monto si es visible"),
-                "moneda":    types.Schema(type="STRING", enum=["ARS", "USD"]),
+                "comercio":       types.Schema(type="STRING", description="Nombre del comercio/emisor"),
+                "fecha":          types.Schema(type="STRING", description="Fecha del documento YYYY-MM-DD"),
+                "tipo":           types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
+                "categoria":      types.Schema(type="STRING", description="Categoría: Servicios, Salud, Impuestos u Otros"),
+                "monto":          types.Schema(type="NUMBER", description="Monto si es visible"),
+                "moneda":         types.Schema(type="STRING", enum=["ARS", "USD"]),
+                "nombre_archivo": types.Schema(type="STRING", description="Nombre personalizado para el archivo (sin extensión). Si no se especifica, se usa el nombre sugerido automáticamente."),
             },
         ),
     ),
@@ -424,9 +433,37 @@ def _es_confirmacion(msg: str) -> bool:
     return any(normalized == c or normalized.startswith(c + " ") for c in _PALABRAS_CONFIRMACION)
 
 
+def _es_pura_confirmacion(msg: str) -> bool:
+    """Exact-match estricto: solo la palabra de confirmación, sin nada más."""
+    normalized = msg.strip().lower().strip("!.,¡¿ ")
+    return normalized in _PALABRAS_CONFIRMACION
+
+
 def _modelo_afirma_guardado(text: str) -> bool:
     normalized = text.lower()
     return any(k in normalized for k in _PALABRAS_GUARDADO_MODELO)
+
+
+def _format_bypass_response(tool: str, args: dict, resultado: dict) -> str:
+    if tool == "guardar_multiples_gastos":
+        guardados = resultado.get("guardados", 0)
+        errores = resultado.get("errores", [])
+        ids = resultado.get("ids", [])
+        ids_str = f" · IDs: {', '.join(str(i)[:8] for i in ids)}" if ids else ""
+        if errores:
+            return f"Guardé {guardados} gastos ✓{ids_str} ({len(errores)} con error)"
+        return f"Guardé los {guardados} gastos ✓{ids_str}"
+
+    comercio = args.get("comercio") or args.get("descripcion", "gasto")
+    monto = args.get("monto", 0)
+    moneda = args.get("moneda", "ARS")
+    categoria = args.get("categoria", "")
+    medio_pago = args.get("medio_pago", "")
+    cuotas = args.get("cuotas", 1)
+    gasto_id = resultado.get("id", "")
+    cuotas_str = f" · {cuotas} cuotas" if cuotas > 1 else ""
+    id_str = f" · ref `{str(gasto_id)[:8]}`" if gasto_id else ""
+    return f"Guardé ✓ {comercio} · ${monto:,.0f} {moneda} · {categoria} · {medio_pago}{cuotas_str}{id_str}"
 
 
 # ──────────────────────────────────────────────
@@ -436,9 +473,26 @@ def _modelo_afirma_guardado(text: str) -> bool:
 def _ejecutar_funcion(nombre: str, args: dict) -> str:
     try:
         if nombre == "guardar_gasto":
-            resultado = guardar_gasto(**args)
+            if args.pop("dry_run", False) and _chat_id_activo is not None:
+                _gasto_pendiente[_chat_id_activo] = {"tool": "guardar_gasto", "args": dict(args)}
+                resultado = {
+                    "preview": True,
+                    "datos": args,
+                    "instruccion": "Mostrá este resumen al usuario y preguntá '¿Confirmo?'",
+                }
+            else:
+                resultado = guardar_gasto(**args)
         elif nombre == "guardar_multiples_gastos":
-            resultado = guardar_multiples_gastos(args["gastos"])
+            if args.pop("dry_run", False) and _chat_id_activo is not None:
+                _gasto_pendiente[_chat_id_activo] = {"tool": "guardar_multiples_gastos", "args": dict(args)}
+                resultado = {
+                    "preview": True,
+                    "gastos": args.get("gastos", []),
+                    "total": len(args.get("gastos", [])),
+                    "instruccion": f"Mostrá el listado al usuario y preguntá '¿Guardo los {len(args.get('gastos', []))} gastos?'",
+                }
+            else:
+                resultado = guardar_multiples_gastos(args["gastos"])
         elif nombre == "guardar_gasto_recurrente":
             resultado = guardar_gasto_recurrente(**args)
         elif nombre == "editar_gasto":
@@ -514,13 +568,14 @@ def _build_system_prompt() -> str:
 
 REGLAS FUNDAMENTALES:
 1. Respondés SIEMPRE en español argentino.
-2. NUNCA guardás un gasto sin mostrar primero un resumen y recibir confirmación explícita del usuario.
-   - 1 gasto → formato: "Voy a guardar: **$MONTO MONEDA** en **DESCRIPCIÓN** (CATEGORÍA) · MEDIO_PAGO · FECHA. ¿Confirmo?"
-   - 2+ gastos → listado numerado + total, luego "¿Guardo los N gastos?". Usar guardar_multiples_gastos, no llamar guardar_gasto N veces.
+2. NUNCA guardás un gasto sin usar dry_run=True primero y recibir confirmación explícita del usuario.
+   - 1 gasto → llamá guardar_gasto con dry_run=True y todos los campos inferidos. La función devuelve los datos; mostráselos al usuario y preguntá "¿Confirmo?"
+   - 2+ gastos → llamá guardar_multiples_gastos con dry_run=True. Mostrá el listado y preguntá "¿Guardo los N gastos?"
+   - El sistema procesará la confirmación automáticamente; no necesitás llamar la función de nuevo.
+   - Si el usuario corrige algo ("sí pero X", "cambiá X"), actualizá los datos y llamá dry_run de nuevo.
 3. Palabras de confirmación válidas: "sí", "si", "dale", "ok", "confirmado", "va", "sí dale", "confirmo", "listo".
-   CRÍTICO: Cuando el usuario confirma, tu ÚNICA acción válida es llamar INMEDIATAMENTE a `guardar_gasto`
-   o `guardar_multiples_gastos`. JAMÁS respondas con texto diciendo "guardado" o "registrado" sin haber
-   llamado primero la función. Si no llamás la función, el gasto NO se guarda. Texto ≠ acción real.
+   Si el usuario confirma con texto adicional ("sí pero X"), NO es confirmación pura: actualizá y hacé dry_run de nuevo.
+   FALLBACK: si el usuario confirmó claramente pero el sistema no procesó la acción, llamá guardar_gasto sin dry_run.
 4. Si el usuario corrige algo en su respuesta, actualizar los datos y volver a pedir confirmación.
 5. Usás el tipo de cambio **oficial** por defecto para conversiones de USD a ARS, salvo que el usuario indique otro.
 6. Siempre informás el tipo de cambio usado cuando guardás un gasto en USD.
@@ -547,7 +602,10 @@ REGLAS FUNDAMENTALES:
 
 COMPROBANTES Y FACTURAS (Google Drive):
 11. Cuando el usuario manda una foto o PDF de un comprobante/factura, los datos extraídos se incluyen
-    en el mensaje. Mostrá un resumen al usuario (comercio, fecha, tipo, monto si hay) y preguntá:
+    en el mensaje junto con el nombre de archivo sugerido. Mostrá ese resumen al usuario incluyendo
+    el nombre que se usará para guardarlo (campo "Nombre de archivo sugerido"). El usuario puede
+    cambiarlo antes de confirmar; si lo hace, pasá el nuevo nombre en el parámetro nombre_archivo.
+    Preguntá:
     - "¿Subo este comprobante a Drive?" (si solo quiere guardar el archivo)
     - "¿Subo a Drive y guardo el gasto también?" (si corresponde crear el gasto)
     Si el usuario dice "solo guardá esto en drive" o similar, subí sin crear gasto.
@@ -585,6 +643,24 @@ def run_agent(
     """
     global _chat_id_activo
     _chat_id_activo = chat_id
+
+    # ── Bypass de confirmación ────────────────────────────────────────────────
+    # Si el mensaje es una confirmación pura y hay un gasto pendiente,
+    # ejecutamos la tool directamente sin pasar por el modelo.
+    if chat_id is not None and _es_pura_confirmacion(user_message):
+        if chat_id in _gasto_pendiente:
+            pending = _gasto_pendiente.pop(chat_id)
+            resultado_str = _ejecutar_funcion(pending["tool"], pending["args"])
+            resultado = json.loads(resultado_str)
+            if "error" in resultado:
+                logger.warning(f"[BYPASS ERROR] chat_id={chat_id} tool={pending['tool']} error={resultado['error']}")
+                return f"Ocurrió un error al guardar: {resultado['error']}. Intentá de nuevo."
+            logger.info(f"[BYPASS] chat_id={chat_id} tool={pending['tool']} OK")
+            return _format_bypass_response(pending["tool"], pending["args"], resultado)
+    # Cualquier mensaje que no sea bypass limpia el pending viciado
+    if chat_id is not None:
+        _gasto_pendiente.pop(chat_id, None)
+    # ─────────────────────────────────────────────────────────────────────────
 
     config = types.GenerateContentConfig(
         system_instruction=_build_system_prompt(),
@@ -640,9 +716,10 @@ def run_agent(
 
         function_response_parts = []
         for fc in function_calls:
-            if fc.name in _SAVE_TOOLS:
+            fc_args = dict(fc.args)
+            if fc.name in _SAVE_TOOLS and not fc_args.get("dry_run"):
                 save_tool_called = True
-            resultado_str = _ejecutar_funcion(fc.name, dict(fc.args))
+            resultado_str = _ejecutar_funcion(fc.name, fc_args)
             logger.info(f"Tool: {fc.name} → {resultado_str[:200]}")
             function_response_parts.append(
                 types.Part.from_function_response(

@@ -1,7 +1,7 @@
 import Sidebar from '@/components/Sidebar'
 import ComprobantesView from '@/components/ComprobantesView'
 import GastosFilter from '@/components/GastosFilter'
-import { getArchivosDrive, getCategorias } from '@/lib/queries'
+import { getArchivosDrive, getCategorias, getGastosMes } from '@/lib/queries'
 import { monthLabel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -15,9 +15,10 @@ export default async function ComprobantesPage({
   const mes = searchParams.mes ? parseInt(searchParams.mes) : hoy.getMonth() + 1
   const anio = searchParams.anio ? parseInt(searchParams.anio) : hoy.getFullYear()
 
-  const [archivos, categorias] = await Promise.all([
+  const [archivos, categorias, gastos] = await Promise.all([
     getArchivosDrive({ mes, anio }),
     getCategorias(),
+    getGastosMes(mes, anio),
   ])
 
   return (
@@ -39,9 +40,8 @@ export default async function ComprobantesPage({
 
           <ComprobantesView
             archivos={archivos}
-            categorias={['Servicios', 'Salud', 'Impuestos', 'Otros', ...categorias.map(c => c.nombre)].filter(
-              (v, i, arr) => arr.indexOf(v) === i,
-            )}
+            gastos={gastos}
+            categorias={categorias.map(c => c.nombre)}
           />
         </div>
       </main>

@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import type { ArchivoDrive } from '@/lib/types'
+import type { ArchivoDrive, Gasto } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
-import { Search, X, ExternalLink } from 'lucide-react'
+import { Search, X, ExternalLink, Link2 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import VincularGastoModal from './VincularGastoModal'
 
 const TIPO_LABELS: Record<string, string> = {
   factura: 'Factura',
@@ -34,12 +35,14 @@ const selectClass = cn(
 interface Props {
   archivos: ArchivoDrive[]
   categorias: string[]
+  gastos: Gasto[]
 }
 
-export default function ComprobantesView({ archivos, categorias }: Props) {
+export default function ComprobantesView({ archivos, categorias, gastos }: Props) {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState('')
   const [tipo, setTipo] = useState('')
+  const [vinculando, setVinculando] = useState<ArchivoDrive | null>(null)
 
   const tipos = useMemo(
     () => Array.from(new Set(archivos.map(a => a.tipo).filter(Boolean))).sort(),
@@ -158,7 +161,14 @@ export default function ComprobantesView({ archivos, categorias }: Props) {
                       {a.gasto_id ? (
                         <Badge variant="success" className="text-[10px]">Vinculado</Badge>
                       ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
+                        <button
+                          onClick={() => setVinculando(a)}
+                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-indigo-500 transition-colors"
+                          title="Vincular a un gasto"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          Vincular
+                        </button>
                       )}
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -183,6 +193,15 @@ export default function ComprobantesView({ archivos, categorias }: Props) {
           </div>
         )}
       </Card>
+
+      {vinculando && (
+        <VincularGastoModal
+          archivoId={vinculando.id}
+          comercio={vinculando.comercio}
+          gastos={gastos}
+          onClose={() => setVinculando(null)}
+        />
+      )}
     </div>
   )
 }

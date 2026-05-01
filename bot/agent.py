@@ -371,7 +371,7 @@ _TOOL_DECLARATIONS = [
                 "comercio":       types.Schema(type="STRING", description="Nombre del comercio/emisor"),
                 "fecha":          types.Schema(type="STRING", description="Fecha del documento YYYY-MM-DD"),
                 "tipo":           types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
-                "categoria":      types.Schema(type="STRING", description="Categoría: Servicios, Salud, Impuestos u Otros"),
+                "categoria":      types.Schema(type="STRING", description="Categoría del comprobante (debe coincidir con las categorías válidas obtenidas via obtener_categorias)"),
                 "monto":          types.Schema(type="NUMBER", description="Monto si es visible"),
                 "moneda":         types.Schema(type="STRING", enum=["ARS", "USD"]),
                 "nombre_archivo": types.Schema(type="STRING", description="Nombre personalizado para el archivo (sin extensión). Si no se especifica, se usa el nombre sugerido automáticamente."),
@@ -621,6 +621,9 @@ COMPROBANTES Y FACTURAS (Google Drive):
 14. Si al subir un comprobante detectás que hay un gasto del mismo comercio en fechas cercanas,
     vinculalos automáticamente con `vincular_comprobante_a_gasto` e informá al usuario.
 15. Si se detecta un duplicado (mismo comercio, fecha y tipo), informá al usuario y no subas de nuevo.
+16. Para la categoría de un comprobante: si el comprobante se vincula a un gasto, usá la misma categoría
+    del gasto. Si no hay gasto, llamá `obtener_categorias` igual que para gastos. NUNCA uses categorías
+    inventadas como "Servicios", "Salud" o "Impuestos" si no existen en la lista de categorías activas.
 """
 
 

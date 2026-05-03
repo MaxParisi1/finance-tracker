@@ -7,9 +7,11 @@ import { MEDIO_PAGO_LABELS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
-import { Trash2, Paperclip, ExternalLink, Plus } from 'lucide-react'
+import { Trash2, Paperclip, ExternalLink, Plus, Link2, Repeat2 } from 'lucide-react'
 import { toast } from 'sonner'
 import AdjuntarArchivoModal from '@/components/AdjuntarArchivoModal'
+import VincularRecurrenteModal from '@/components/VincularRecurrenteModal'
+import type { GastoRecurrente } from '@/lib/types'
 
 const MEDIO_PAGO_OPTIONS = Object.entries(MEDIO_PAGO_LABELS)
 
@@ -24,15 +26,20 @@ interface Props {
   gasto: Gasto
   categorias: string[]
   comercios: string[]
+  recurrentes?: GastoRecurrente[]
   onClose: () => void
 }
 
-export default function EditGastoModal({ gasto, categorias, comercios, onClose }: Props) {
+export default function EditGastoModal({ gasto, categorias, comercios, recurrentes, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAdjuntar, setShowAdjuntar] = useState(false)
+  const [showVincular, setShowVincular] = useState(false)
   const [archivos, setArchivos] = useState<ArchivoDrive[]>([])
+  const [recurrenteId, setRecurrenteId] = useState<string | null | undefined>(gasto.recurrente_id)
+
+  const recurrenteVinculado = recurrentes?.find(r => r.id === recurrenteId)
 
   useEffect(() => {
     fetch(`/api/archivos?gastoId=${gasto.id}`)
@@ -175,6 +182,36 @@ export default function EditGastoModal({ gasto, categorias, comercios, onClose }
             <input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className={fieldClass} />
           </div>
 
+          {recurrentes && recurrentes.length > 0 && (
+            <div>
+              <label className={labelClass}>Recurrente vinculado</label>
+              {recurrenteVinculado ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Repeat2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                    <span className="text-sm font-medium text-foreground truncate">{recurrenteVinculado.descripcion}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVincular(true)}
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors flex-shrink-0"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowVincular(true)}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-border py-2.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-primary transition-all duration-150"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  Vincular a un recurrente
+                </button>
+              )}
+            </div>
+          )}
+
           <div>
             <label className={labelClass}>Notas</label>
             <textarea
@@ -303,6 +340,19 @@ export default function EditGastoModal({ gasto, categorias, comercios, onClose }
         categoria={form.categoria}
         onClose={() => setShowAdjuntar(false)}
         onSuccess={recargarArchivos}
+      />
+    )}
+
+    {showVincular && recurrentes && (
+      <VincularRecurrenteModal
+        gastoId={gasto.id}
+        comercio={form.comercio || gasto.comercio}
+        recurrentes={recurrentes}
+        recurrenteActualId={recurrenteId}
+        onClose={(newId) => {
+          setShowVincular(false)
+          if (newId !== undefined) setRecurrenteId(newId)
+        }}
       />
     )}
   </>

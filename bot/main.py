@@ -12,6 +12,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 from telegram import Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     ContextTypes,
@@ -20,6 +21,7 @@ from telegram.ext import (
 
 from bot.agent import run_agent, set_pdf_pendiente
 from bot.gmail_poller import start_gmail_polling
+from bot.tools import recurrentes_matcher as matcher
 from bot.tools.media_processor import (
     procesar_imagen_ticket,
     procesar_audio,
@@ -372,6 +374,17 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 # ──────────────────────────────────────────────
+# Callbacks de recurrentes
+# ──────────────────────────────────────────────
+
+async def match_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    texto = await matcher.procesar_callback(query)
+    await query.edit_message_text(text=texto, parse_mode="Markdown")
+
+
+# ──────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────
 
@@ -388,6 +401,7 @@ async def _run() -> None:
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("reset", reset_handler))
+    app.add_handler(CallbackQueryHandler(match_callback_handler, pattern=r"^mr:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))

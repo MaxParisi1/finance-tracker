@@ -68,6 +68,69 @@ export async function updateGastoAction(
   revalidatePath('/comprobantes')
 }
 
+export async function vincularRecurrenteAction(
+  gastoId: string,
+  recurrenteId: string | null,
+  comercio?: string,
+) {
+  const supabase = getSupabaseServer()
+
+  await supabase
+    .from('gastos')
+    .update({ recurrente_id: recurrenteId })
+    .eq('id', gastoId)
+
+  if (recurrenteId === null) {
+    revalidatePath('/gastos')
+    return
+  }
+
+  // Guardar alias para auto-matching futuro
+  if (comercio?.trim()) {
+    const norm = comercio.trim().toLowerCase()
+      .replace(/\.(com|net|org|ar|io)\b/g, '')
+      .replace(/[*.\-_/\\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (norm) {
+      await supabase
+        .from('recurrentes_aliases')
+        .upsert(
+          { recurrente_id: recurrenteId, comercio_normalizado: norm, confirmado_por_usuario: true },
+          { onConflict: 'comercio_normalizado' },
+        )
+    }
+  }
+
+  // Avanzar proximo_vencimiento del recurrente
+  const { data: rec } = await supabase
+    .from('gastos_recurrentes')
+    .select('frecuencia, proximo_vencimiento')
+    .eq('id', recurrenteId)
+    .single()
+
+  if (rec?.proximo_vencimiento) {
+    const [y, m, d] = rec.proximo_vencimiento.split('-').map(Number)
+    let nuevaFecha: string
+    if (rec.frecuencia === 'anual') {
+      nuevaFecha = new Date(y + 1, m - 1, d).toISOString().split('T')[0]
+    } else if (rec.frecuencia === 'semanal') {
+      const dt = new Date(y, m - 1, d)
+      dt.setDate(dt.getDate() + 7)
+      nuevaFecha = dt.toISOString().split('T')[0]
+    } else {
+      nuevaFecha = new Date(y, m, d).toISOString().split('T')[0] // JS auto-wraps month
+    }
+    await supabase
+      .from('gastos_recurrentes')
+      .update({ proximo_vencimiento: nuevaFecha })
+      .eq('id', recurrenteId)
+  }
+
+  revalidatePath('/gastos')
+  revalidatePath('/recurrentes')
+}
+
 export async function deleteGastoAction(id: string) {
   const supabase = getSupabaseServer()
   const { error } = await supabase

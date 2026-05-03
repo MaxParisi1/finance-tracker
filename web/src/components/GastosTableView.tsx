@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import type { Gasto } from '@/lib/types'
+import type { Gasto, GastoRecurrente } from '@/lib/types'
 import ExpenseTable from './ExpenseTable'
 import EditGastoModal from './EditGastoModal'
 import { formatARS } from '@/lib/utils'
@@ -15,6 +15,7 @@ interface Props {
   categorias: string[]
   comercios?: string[]
   archivoCounts?: Record<string, number>
+  recurrentes?: GastoRecurrente[]
 }
 
 const selectClass = cn(
@@ -23,7 +24,7 @@ const selectClass = cn(
   'transition-colors text-foreground cursor-pointer'
 )
 
-export default function GastosTableView({ gastos, categorias, comercios: comerciosProp, archivoCounts }: Props) {
+export default function GastosTableView({ gastos, categorias, comercios: comerciosProp, archivoCounts, recurrentes }: Props) {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState('')
   const [moneda, setMoneda] = useState('')
@@ -170,6 +171,7 @@ export default function GastosTableView({ gastos, categorias, comercios: comerci
           gasto={editing}
           categorias={categorias}
           comercios={comercios}
+          recurrentes={recurrentes}
           onClose={() => setEditing(null)}
         />
       )}

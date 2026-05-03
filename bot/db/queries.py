@@ -126,6 +126,46 @@ def obtener_recurrentes_activos() -> list[dict]:
     return res.data
 
 
+def vincular_gasto_recurrente(gasto_id: str, recurrente_id: str) -> None:
+    client = get_client()
+    client.table("gastos").update({"recurrente_id": recurrente_id}).eq("id", gasto_id).execute()
+    logger.info("Gasto %s vinculado a recurrente %s", gasto_id, recurrente_id)
+
+
+def avanzar_proximo_vencimiento(recurrente_id: str, frecuencia: str, proximo_actual: str) -> None:
+    import calendar as _cal
+    d = date.fromisoformat(str(proximo_actual))
+    if frecuencia == "anual":
+        nueva = d.replace(year=d.year + 1)
+    elif frecuencia == "semanal":
+        from datetime import timedelta
+        nueva = d + timedelta(days=7)
+    else:
+        mes = d.month + 1
+        anio = d.year
+        if mes > 12:
+            mes, anio = 1, anio + 1
+        nueva = d.replace(year=anio, month=mes, day=min(d.day, _cal.monthrange(anio, mes)[1]))
+    client = get_client()
+    client.table("gastos_recurrentes").update({"proximo_vencimiento": nueva.isoformat()}).eq("id", recurrente_id).execute()
+    logger.info("Recurrente %s → proximo_vencimiento=%s", recurrente_id, nueva)
+
+
+def obtener_aliases_recurrentes() -> dict[str, str]:
+    """Retorna dict {comercio_normalizado: recurrente_id}."""
+    client = get_client()
+    res = client.table("recurrentes_aliases").select("comercio_normalizado, recurrente_id").execute()
+    return {r["comercio_normalizado"]: r["recurrente_id"] for r in res.data}
+
+
+def upsert_alias_recurrente(recurrente_id: str, comercio_normalizado: str, confirmado_por_usuario: bool) -> None:
+    client = get_client()
+    client.table("recurrentes_aliases").upsert(
+        {"recurrente_id": recurrente_id, "comercio_normalizado": comercio_normalizado, "confirmado_por_usuario": confirmado_por_usuario},
+        on_conflict="comercio_normalizado",
+    ).execute()
+
+
 # ──────────────────────────────────────────────
 # Categorías
 # ──────────────────────────────────────────────

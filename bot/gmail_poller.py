@@ -16,6 +16,7 @@ from bot.gemini_client import generate_with_fallback
 from bot.tools.gastos import guardar_gasto, historial_comercio
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
 from bot.db.queries import obtener_categorias_activas
+from bot.tools import recurrentes_matcher as matcher
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,32 @@ Categorías válidas: {categorias_str}."""
         return {"categoria": "Otros", "descripcion": comercio, "notas": None}
 
 
+async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
+    """Post-save: intenta vincular el gasto guardado a un recurrente activo."""
+    try:
+        candidato = await asyncio.to_thread(matcher.encontrar_candidato_db, gasto)
+        if candidato is None:
+            return
+        comercio = gasto.get("comercio") or gasto.get("descripcion") or ""
+        if candidato.metodo in ("alias", "fuzzy", "gemini"):
+            await asyncio.to_thread(
+                matcher.confirmar_vinculacion,
+                gasto["id"], candidato.recurrente, comercio,
+                guardar_alias=(candidato.metodo != "alias"),
+            )
+            rec_esc = _escape_md(candidato.recurrente["descripcion"])
+            com_esc = _escape_md(comercio)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🔗 *Recurrente vinculado:* {com_esc} → _{rec_esc}_",
+                parse_mode="Markdown",
+            )
+        else:
+            await matcher.solicitar_confirmacion_telegram(bot, chat_id, gasto, candidato)
+    except Exception:
+        logger.exception("Error al intentar match recurrente para gasto %s", gasto.get("id"))
+
+
 def _escape_md(text: str) -> str:
     """Escapa caracteres especiales de Markdown de Telegram."""
     text = text.replace("*", " ")
@@ -216,7 +243,7 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
                 await asyncio.to_thread(mark_as_read, email["id"])
                 continue
 
-            await asyncio.to_thread(
+            gasto_guardado = await asyncio.to_thread(
                 guardar_gasto,
                 descripcion=data.get("descripcion", "Pago con tarjeta"),
                 monto=float(data["monto"]),
@@ -229,6 +256,7 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
                 tarjeta=data.get("tarjeta"),
             )
 
+            await _intentar_match_recurrente(bot, chat_id, gasto_guardado)
             await asyncio.to_thread(mark_as_read, email["id"])
 
             moneda_sym = "USD " if data.get("moneda") == "USD" else "$"
@@ -286,7 +314,7 @@ async def poll_visa_once(bot, chat_id: int) -> None:
 
             enriquecido = await asyncio.to_thread(_enriquecer_prisma, parsed)
 
-            await asyncio.to_thread(
+            gasto_guardado = await asyncio.to_thread(
                 guardar_gasto,
                 descripcion=enriquecido["descripcion"],
                 monto=parsed["monto"],
@@ -300,6 +328,7 @@ async def poll_visa_once(bot, chat_id: int) -> None:
                 tarjeta=tarjeta_nombre,
             )
 
+            await _intentar_match_recurrente(bot, chat_id, gasto_guardado)
             await asyncio.to_thread(mark_as_read, email["id"])
 
             pendiente = tarjeta_row.get("pendiente_clasificacion", False)

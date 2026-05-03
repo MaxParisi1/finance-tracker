@@ -13,6 +13,7 @@ export interface Gasto {
   cuotas: number
   cuota_actual: number
   es_recurrente: boolean
+  recurrente_id?: string | null
   comercio?: string
   notas?: string
   fuente: string

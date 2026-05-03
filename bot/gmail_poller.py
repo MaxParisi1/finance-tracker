@@ -25,9 +25,9 @@ POLL_INTERVAL = 900  # 15 minutos
 # Ancla en "$ monto en el establecimiento" para ser agnóstico al tipo
 # ("consumo", "débito automático", etc.)
 _PRISMA_RE = re.compile(
-    r"\$\s*([\d.,]+)\s+en\s+el\s+establecimiento\s+(.+?)\s+,"  # monto + comercio
-    r".*?el\s+d[ií]a\s+(\d{2}/\d{2}/\d{4})"                   # fecha DD/MM/YYYY
-    r".*?finalizada\s+en\s+(\d{4})",                            # sufijo
+    r"(?:U\$S|\$)\s*([\d.,]+)\s+en\s+el\s+establecimiento\s+(.+?)\s+,"  # monto + comercio (ARS: "$ X" o USD: "U$S X")
+    r".*?el\s+d[ií]a\s+(\d{2}/\d{2}/\d{4})"                             # fecha DD/MM/YYYY
+    r".*?finalizada\s+en\s+(\d{4})",                                      # sufijo
     re.IGNORECASE | re.DOTALL,
 )
 

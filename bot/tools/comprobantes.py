@@ -197,6 +197,43 @@ def vincular_comprobante_a_gasto(archivo_id: str, gasto_id: str) -> dict:
         return {"error": str(e)}
 
 
+def listar_carpetas_drive() -> dict:
+    """Lista las carpetas raíz existentes en Google Drive."""
+    try:
+        dm = get_drive_manager()
+        carpetas = dm.list_root_folders()
+        return {"carpetas": carpetas}
+    except Exception as e:
+        logger.exception("Error listando carpetas de Drive")
+        return {"error": str(e)}
+
+
+def eliminar_comprobante_drive(archivo_id: str, eliminar_de_drive: bool = False) -> dict:
+    """
+    Elimina un comprobante de la base de datos y opcionalmente de Google Drive.
+
+    Si eliminar_de_drive=True, también borra el archivo físico de Drive.
+    Si False (default), solo elimina el registro de Supabase.
+    """
+    from bot.db.supabase_client import get_client
+    client = get_client()
+    res = client.table("archivos_drive").select("drive_file_id").eq("id", archivo_id).execute()
+    if not res.data:
+        return {"error": "No se encontró el archivo."}
+
+    drive_file_id = res.data[0].get("drive_file_id")
+
+    if eliminar_de_drive and drive_file_id:
+        try:
+            dm = get_drive_manager()
+            dm.delete_file(drive_file_id)
+            logger.info("Archivo eliminado de Drive: %s", drive_file_id)
+        except Exception as e:
+            logger.warning("No se pudo eliminar de Drive: %s", e)
+
+    return queries.eliminar_archivo_drive(archivo_id)
+
+
 def buscar_comprobantes(
     comercio: str | None = None,
     mes: int | None = None,

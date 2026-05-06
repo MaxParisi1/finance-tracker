@@ -13,9 +13,10 @@ interface Props {
   comercio?: string | null
   gastos: Gasto[]
   onClose: () => void
+  onVinculado?: (archivoId: string, gastoId: string) => void
 }
 
-export default function VincularGastoModal({ archivoId, comercio, gastos, onClose }: Props) {
+export default function VincularGastoModal({ archivoId, comercio, gastos, onClose, onVinculado }: Props) {
   const [search, setSearch] = useState(comercio ?? '')
   const [selected, setSelected] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -39,6 +40,7 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
       try {
         await vincularArchivoExistenteAction(archivoId, selected)
         setDone(true)
+        onVinculado?.(archivoId, selected)
         toast.success('Comprobante vinculado al gasto')
         setTimeout(onClose, 800)
       } catch {

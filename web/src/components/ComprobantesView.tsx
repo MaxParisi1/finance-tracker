@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import type { ArchivoDrive, Gasto } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
-import { Search, X, ExternalLink, Link2 } from 'lucide-react'
+import { Search, X, ExternalLink, Link2, Unlink, Trash2 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -43,14 +43,45 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
   const [categoria, setCategoria] = useState('')
   const [tipo, setTipo] = useState('')
   const [vinculando, setVinculando] = useState<ArchivoDrive | null>(null)
+  const [archivosState, setArchivosState] = useState<ArchivoDrive[]>(archivos)
+  const [eliminando, setEliminando] = useState<string | null>(null)
+  const [desvinculando, setDesvinculando] = useState<string | null>(null)
+
+  async function handleEliminar(id: string) {
+    if (!confirm('¿Eliminar este comprobante de la base de datos?')) return
+    setEliminando(id)
+    try {
+      const res = await fetch(`/api/archivos?id=${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setArchivosState(prev => prev.filter(a => a.id !== id))
+      }
+    } finally {
+      setEliminando(null)
+    }
+  }
+
+  async function handleDesvincular(id: string) {
+    if (!confirm('¿Desvincular este comprobante del gasto?')) return
+    setDesvinculando(id)
+    try {
+      const res = await fetch(`/api/archivos?id=${id}`, { method: 'PATCH' })
+      if (res.ok) {
+        setArchivosState(prev =>
+          prev.map(a => a.id === id ? { ...a, gasto_id: null } : a)
+        )
+      }
+    } finally {
+      setDesvinculando(null)
+    }
+  }
 
   const tipos = useMemo(
-    () => Array.from(new Set(archivos.map(a => a.tipo).filter(Boolean))).sort(),
-    [archivos],
+    () => Array.from(new Set(archivosState.map(a => a.tipo).filter(Boolean))).sort(),
+    [archivosState],
   )
 
   const filtered = useMemo(() => {
-    return archivos.filter(a => {
+    return archivosState.filter(a => {
       if (categoria && a.categoria !== categoria) return false
       if (tipo && a.tipo !== tipo) return false
       if (search) {
@@ -61,7 +92,7 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
       }
       return true
     })
-  }, [archivos, search, categoria, tipo])
+  }, [archivosState, search, categoria, tipo])
 
   const hasFilters = search || categoria || tipo
 
@@ -113,8 +144,8 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
       <div className="flex items-center gap-3 mb-4 text-sm text-muted-foreground">
         <span>
           <span className="font-semibold text-foreground">{filtered.length}</span> archivos
-          {hasFilters && archivos.length !== filtered.length && (
-            <span> (de {archivos.length} total)</span>
+          {hasFilters && archivosState.length !== filtered.length && (
+            <span> (de {archivosState.length} total)</span>
           )}
         </span>
       </div>
@@ -130,9 +161,9 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  {['Fecha', 'Comercio', 'Tipo', 'Gasto', 'Archivo'].map((h, i) => (
+                  {['Fecha', 'Comercio', 'Tipo', 'Gasto', 'Archivo', ''].map((h, i) => (
                     <th
-                      key={h}
+                      key={h || 'acciones'}
                       className={cn(
                         'py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wide',
                         i < 3 ? 'text-left' : 'text-center'
@@ -159,7 +190,17 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
                     </td>
                     <td className="py-3 px-4 text-center">
                       {a.gasto_id ? (
-                        <Badge variant="success" className="text-[10px]">Vinculado</Badge>
+                        <div className="inline-flex items-center gap-1.5">
+                          <Badge variant="success" className="text-[10px]">Vinculado</Badge>
+                          <button
+                            onClick={() => handleDesvincular(a.id)}
+                            disabled={desvinculando === a.id}
+                            className="text-muted-foreground hover:text-orange-500 transition-colors disabled:opacity-40"
+                            title="Desvincular del gasto"
+                          >
+                            <Unlink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ) : (
                         <button
                           onClick={() => setVinculando(a)}
@@ -186,6 +227,16 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
                         <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => handleEliminar(a.id)}
+                        disabled={eliminando === a.id}
+                        className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-40"
+                        title="Eliminar comprobante"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -200,6 +251,11 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
           comercio={vinculando.comercio}
           gastos={gastos}
           onClose={() => setVinculando(null)}
+          onVinculado={(id, gastoId) => {
+            setArchivosState(prev =>
+              prev.map(a => a.id === id ? { ...a, gasto_id: gastoId } : a)
+            )
+          }}
         />
       )}
     </div>

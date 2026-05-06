@@ -37,6 +37,8 @@ from bot.tools.comprobantes import (
     subir_comprobante_a_drive,
     vincular_comprobante_a_gasto,
     buscar_comprobantes,
+    listar_carpetas_drive,
+    eliminar_comprobante_drive,
 )
 from bot.db.queries import obtener_categorias_activas, obtener_gastos
 
@@ -52,6 +54,10 @@ _pdf_pendiente: dict[int, dict] = {}
 # Estado temporal del gasto pendiente de confirmación (en memoria, por chat_id)
 # { chat_id: {"tool": "guardar_gasto"|"guardar_multiples_gastos", "args": dict} }
 _gasto_pendiente: dict[int, dict] = {}
+
+# Estado temporal del comprobante pendiente de subir (en memoria, por chat_id)
+# { chat_id: {"args": dict} }
+_comprobante_pendiente: dict[int, dict] = {}
 
 
 def set_pdf_pendiente(chat_id: int, resultado: dict, pdf_bytes: bytes) -> None:
@@ -361,13 +367,14 @@ _TOOL_DECLARATIONS = [
         name="subir_comprobante_a_drive",
         description=(
             "Sube el comprobante/factura que el usuario acaba de enviar a Google Drive. "
-            "Los bytes del archivo ya están almacenados internamente. "
-            "Los parámetros permiten sobreescribir los datos que Gemini Vision extrajo. "
-            "Llamar SOLO después de mostrar un resumen al usuario y recibir confirmación."
+            "OBLIGATORIO: llamar primero con dry_run=True para mostrar el preview (nombre de archivo, "
+            "carpeta destino, carpetas existentes en Drive) y esperar confirmación del usuario. "
+            "Solo llamar sin dry_run después de que el usuario confirme explícitamente."
         ),
         parameters=types.Schema(
             type="OBJECT",
             properties={
+                "dry_run":        types.Schema(type="BOOLEAN", description="True para previsualizar sin subir. Usar SIEMPRE antes de pedir confirmación."),
                 "comercio":       types.Schema(type="STRING", description="Nombre del comercio/emisor"),
                 "fecha":          types.Schema(type="STRING", description="Fecha del documento YYYY-MM-DD"),
                 "tipo":           types.Schema(type="STRING", description="factura, comprobante, ticket, recibo o resumen"),
@@ -412,6 +419,33 @@ _TOOL_DECLARATIONS = [
                 "fecha_desde": types.Schema(type="STRING", description="Fecha desde YYYY-MM-DD"),
                 "fecha_hasta": types.Schema(type="STRING", description="Fecha hasta YYYY-MM-DD"),
             },
+        ),
+    ),
+
+    types.FunctionDeclaration(
+        name="listar_carpetas_drive",
+        description=(
+            "Lista las carpetas de primer nivel que existen en Google Drive. "
+            "Llamar cuando no estés seguro de en qué carpeta guardar un comprobante, "
+            "para mostrarle al usuario las opciones disponibles."
+        ),
+        parameters=types.Schema(type="OBJECT", properties={}),
+    ),
+
+    types.FunctionDeclaration(
+        name="eliminar_comprobante_drive",
+        description=(
+            "Elimina un comprobante de la base de datos. "
+            "Si eliminar_de_drive=True, también borra el archivo físico de Google Drive. "
+            "Confirmar con el usuario antes de llamar."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "archivo_id":       types.Schema(type="STRING", description="UUID del archivo en Supabase"),
+                "eliminar_de_drive": types.Schema(type="BOOLEAN", description="True para borrar también el archivo físico de Drive. Default False."),
+            },
+            required=["archivo_id"],
         ),
     ),
 ]
@@ -470,8 +504,44 @@ def _format_bypass_response(tool: str, args: dict, resultado: dict) -> str:
 # Dispatcher
 # ──────────────────────────────────────────────
 
+def _validar_categoria(categoria: str) -> str | None:
+    """
+    Verifica que la categoría exista en la lista activa.
+    Retorna un mensaje de error si no es válida, o None si es válida.
+    """
+    try:
+        categorias = obtener_categorias_activas()
+        nombres = [c["nombre"] for c in categorias]
+        if categoria not in nombres:
+            return (
+                f"Categoría inválida: '{categoria}'. "
+                f"Categorías válidas: {nombres}. "
+                f"Corregí la categoría antes de guardar."
+            )
+    except Exception:
+        pass  # Si falla la consulta, no bloqueamos
+    return None
+
+
 def _ejecutar_funcion(nombre: str, args: dict) -> str:
     try:
+        # ── Validación de categoría para tools de guardado ────────────────────
+        if nombre in ("guardar_gasto", "guardar_multiples_gastos", "guardar_gasto_recurrente",
+                      "subir_comprobante_a_drive"):
+            categoria = args.get("categoria")
+            if categoria and not args.get("dry_run"):
+                error_cat = _validar_categoria(categoria)
+                if error_cat:
+                    return json.dumps({"error": error_cat}, ensure_ascii=False)
+            if nombre == "guardar_multiples_gastos" and not args.get("dry_run"):
+                for g in args.get("gastos", []):
+                    cat = g.get("categoria", "")
+                    if cat:
+                        error_cat = _validar_categoria(cat)
+                        if error_cat:
+                            return json.dumps({"error": error_cat}, ensure_ascii=False)
+        # ─────────────────────────────────────────────────────────────────────
+
         if nombre == "guardar_gasto":
             if args.pop("dry_run", False) and _chat_id_activo is not None:
                 _gasto_pendiente[_chat_id_activo] = {"tool": "guardar_gasto", "args": dict(args)}
@@ -528,11 +598,59 @@ def _ejecutar_funcion(nombre: str, args: dict) -> str:
         elif nombre == "historial_comercio":
             resultado = historial_comercio(**args)
         elif nombre == "subir_comprobante_a_drive":
-            resultado = subir_comprobante_a_drive(chat_id=_chat_id_activo, **args)
+            if args.pop("dry_run", False) and _chat_id_activo is not None:
+                # Preview sin subir: calcular carpeta destino y listar carpetas existentes
+                from bot.tools.comprobantes import get_archivo_pendiente, preview_filename
+                from bot.tools.drive_manager import get_drive_manager
+                from datetime import date as _date
+                pendiente = get_archivo_pendiente(_chat_id_activo)
+                datos = pendiente["datos_extraidos"] if pendiente else {}
+                comercio = args.get("comercio") or datos.get("comercio") or "desconocido"
+                fecha_str = args.get("fecha") or datos.get("fecha") or _date.today().isoformat()
+                tipo = args.get("tipo") or datos.get("tipo") or "comprobante"
+                try:
+                    fecha_doc = _date.fromisoformat(fecha_str)
+                except ValueError:
+                    fecha_doc = _date.today()
+                mime = pendiente["mime_type"] if pendiente else "application/pdf"
+                nombre_sugerido = preview_filename(
+                    {**datos, "comercio": comercio, "fecha": fecha_str, "tipo": tipo}, mime
+                )
+                try:
+                    dm = get_drive_manager()
+                    carpeta_prop = f"{comercio.title().strip()}/{fecha_doc.year}/{fecha_doc.month:02d} - {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][fecha_doc.month-1]}"
+                    carpetas_existentes = dm.list_root_folders()
+                except Exception:
+                    carpeta_prop = f"{comercio}/{fecha_doc.year}"
+                    carpetas_existentes = []
+                _comprobante_pendiente[_chat_id_activo] = {"args": dict(args)}
+                resultado = {
+                    "preview": True,
+                    "nombre_archivo": nombre_sugerido,
+                    "carpeta_propuesta": carpeta_prop,
+                    "carpetas_existentes_en_drive": carpetas_existentes,
+                    "comercio": comercio,
+                    "fecha": fecha_str,
+                    "tipo": tipo,
+                    "monto": args.get("monto") or datos.get("monto"),
+                    "moneda": args.get("moneda") or datos.get("moneda"),
+                    "instruccion": (
+                        "Mostrá al usuario: nombre de archivo, carpeta propuesta y carpetas existentes. "
+                        "Preguntá '¿Subo a esta carpeta?' Si quiere otra carpeta, actualizá el comercio y hacé dry_run de nuevo."
+                    ),
+                }
+            else:
+                resultado = subir_comprobante_a_drive(chat_id=_chat_id_activo, **args)
+                if _chat_id_activo is not None:
+                    _comprobante_pendiente.pop(_chat_id_activo, None)
         elif nombre == "vincular_comprobante_a_gasto":
             resultado = vincular_comprobante_a_gasto(**args)
         elif nombre == "buscar_comprobantes":
             resultado = buscar_comprobantes(**args)
+        elif nombre == "listar_carpetas_drive":
+            resultado = listar_carpetas_drive()
+        elif nombre == "eliminar_comprobante_drive":
+            resultado = eliminar_comprobante_drive(**args)
         else:
             resultado = {"error": f"Función desconocida: {nombre}"}
     except Exception as e:
@@ -602,17 +720,18 @@ REGLAS FUNDAMENTALES:
 
 COMPROBANTES Y FACTURAS (Google Drive):
 11. Cuando el usuario manda una foto o PDF de un comprobante/factura, los datos extraídos se incluyen
-    en el mensaje junto con el nombre de archivo sugerido. Mostrá ese resumen al usuario incluyendo
-    el nombre que se usará para guardarlo (campo "Nombre de archivo sugerido"). El usuario puede
-    cambiarlo antes de confirmar; si lo hace, pasá el nuevo nombre en el parámetro nombre_archivo.
-    Preguntá:
-    - "¿Subo este comprobante a Drive?" (si solo quiere guardar el archivo)
-    - "¿Subo a Drive y guardo el gasto también?" (si corresponde crear el gasto)
-    Si el usuario dice "solo guardá esto en drive" o similar, subí sin crear gasto.
-12. Al confirmar subida, llamá `subir_comprobante_a_drive` con los datos. Después de subir exitosamente,
-    mostrá: nombre de archivo, ubicación en Drive y link.
-    Si también se creó un gasto (con `guardar_gasto`), SIEMPRE vinculá el comprobante al gasto
-    llamando `vincular_comprobante_a_gasto` con:
+    en el mensaje. Seguí SIEMPRE este flujo de dos pasos:
+    PASO 1 — llamá `subir_comprobante_a_drive` con dry_run=True y todos los datos inferidos.
+             La función devuelve el nombre de archivo sugerido, la carpeta propuesta y las carpetas
+             existentes en Drive. Mostrá todo eso al usuario y preguntá:
+             "¿Subo a esta carpeta?" o "¿Subo a Drive y guardo el gasto también?"
+    PASO 2 — solo si el usuario confirma explícitamente, llamá `subir_comprobante_a_drive` sin dry_run.
+             El sistema procesará la confirmación automáticamente (bypass).
+    Si el usuario quiere otra carpeta: actualizá el comercio con el nombre correcto y llamá dry_run de nuevo.
+    Si no estás seguro de la carpeta correcta, llamá `listar_carpetas_drive` para ver las existentes.
+    NUNCA subas el comprobante antes de recibir confirmación explícita del usuario.
+12. Al confirmar subida, el sistema la procesa automáticamente. Si también se creó un gasto (con `guardar_gasto`),
+    SIEMPRE vinculá el comprobante al gasto llamando `vincular_comprobante_a_gasto` con:
     - archivo_id = el campo "id" del resultado de subir_comprobante_a_drive (es un UUID, ej: "d20555aa-...")
     - gasto_id = el campo "id" del resultado de guardar_gasto
     NO uses el link ni el drive_file_id como archivo_id. Hacelo automáticamente sin preguntar.
@@ -624,6 +743,8 @@ COMPROBANTES Y FACTURAS (Google Drive):
 16. Para la categoría de un comprobante: si el comprobante se vincula a un gasto, usá la misma categoría
     del gasto. Si no hay gasto, llamá `obtener_categorias` igual que para gastos. NUNCA uses categorías
     inventadas como "Servicios", "Salud" o "Impuestos" si no existen en la lista de categorías activas.
+17. Si el usuario pide eliminar un comprobante, usá `eliminar_comprobante_drive` con el archivo_id.
+    Preguntá si también quiere borrarlo de Google Drive (eliminar_de_drive=True). Default: solo DB.
 """
 
 
@@ -648,7 +769,7 @@ def run_agent(
     _chat_id_activo = chat_id
 
     # ── Bypass de confirmación ────────────────────────────────────────────────
-    # Si el mensaje es una confirmación pura y hay un gasto pendiente,
+    # Si el mensaje es una confirmación pura y hay un gasto o comprobante pendiente,
     # ejecutamos la tool directamente sin pasar por el modelo.
     if chat_id is not None and _es_pura_confirmacion(user_message):
         if chat_id in _gasto_pendiente:
@@ -660,9 +781,22 @@ def run_agent(
                 return f"Ocurrió un error al guardar: {resultado['error']}. Intentá de nuevo."
             logger.info(f"[BYPASS] chat_id={chat_id} tool={pending['tool']} OK")
             return _format_bypass_response(pending["tool"], pending["args"], resultado)
-    # Cualquier mensaje que no sea bypass limpia el pending viciado
+        if chat_id in _comprobante_pendiente:
+            pending = _comprobante_pendiente.pop(chat_id)
+            resultado_str = _ejecutar_funcion("subir_comprobante_a_drive", pending["args"])
+            resultado = json.loads(resultado_str)
+            if "error" in resultado:
+                logger.warning(f"[BYPASS COMPROBANTE ERROR] chat_id={chat_id} error={resultado['error']}")
+                return f"Ocurrió un error al subir el comprobante: {resultado['error']}. Intentá de nuevo."
+            logger.info(f"[BYPASS COMPROBANTE] chat_id={chat_id} OK")
+            archivo = resultado.get("archivo", "")
+            carpeta = resultado.get("carpeta", "")
+            link = resultado.get("link", "")
+            return f"Comprobante subido ✓ `{archivo}` → {carpeta}\n{link}"
+    # Cualquier mensaje que no sea bypass limpia los pendientes viciados
     if chat_id is not None:
         _gasto_pendiente.pop(chat_id, None)
+        _comprobante_pendiente.pop(chat_id, None)
     # ─────────────────────────────────────────────────────────────────────────
 
     config = types.GenerateContentConfig(

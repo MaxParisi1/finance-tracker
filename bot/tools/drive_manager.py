@@ -242,6 +242,22 @@ class DriveManager:
 
         return f"{fecha_str}_{comercio_norm}_{tipo}.{extension}"
 
+    def list_root_folders(self) -> list[str]:
+        """Lista las carpetas de primer nivel dentro del root folder."""
+        query = (
+            f"'{self._root_folder_id}' in parents and "
+            f"mimeType='application/vnd.google-apps.folder' and "
+            f"trashed=false"
+        )
+        results = self._service.files().list(
+            q=query, fields="files(id, name)", spaces="drive", orderBy="name"
+        ).execute()
+        return [f["name"] for f in results.get("files", [])]
+
+    def delete_file(self, file_id: str) -> None:
+        """Elimina un archivo de Drive por su ID."""
+        self._service.files().delete(fileId=file_id).execute()
+
     def check_duplicate(self, filename: str, folder_id: str) -> dict | None:
         """
         Verifica si ya existe un archivo con el mismo nombre en la carpeta.

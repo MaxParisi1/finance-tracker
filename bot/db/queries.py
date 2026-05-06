@@ -363,6 +363,27 @@ def contar_archivos_por_gastos(gasto_ids: list[str]) -> dict[str, int]:
     return conteo
 
 
+def eliminar_archivo_drive(archivo_id: str) -> dict:
+    """Elimina el registro de un archivo de la base de datos."""
+    client = get_client()
+    client.table("archivos_drive").delete().eq("id", archivo_id).execute()
+    return {"eliminado": True, "id": archivo_id}
+
+
+def desvincular_archivo_drive(archivo_id: str) -> dict:
+    """Desvincula un archivo de su gasto (pone gasto_id = null)."""
+    client = get_client()
+    res = (
+        client.table("archivos_drive")
+        .update({"gasto_id": None})
+        .eq("id", archivo_id)
+        .execute()
+    )
+    if not res.data:
+        return {"error": "No se encontró el archivo."}
+    return {"desvinculado": True, "id": archivo_id}
+
+
 # ──────────────────────────────────────────────
 # Tarjetas
 # ──────────────────────────────────────────────

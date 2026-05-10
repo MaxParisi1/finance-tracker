@@ -412,6 +412,8 @@ export async function getCuotasActivas(): Promise<CuotaActiva[]> {
 export interface RecurrenteConCosto extends GastoRecurrente {
   mensual_ars: number
   dias_para_vencimiento: number
+  ultimo_monto_original?: number
+  ultimo_moneda?: string
 }
 
 export async function getRecurrentesConCosto(): Promise<{
@@ -422,18 +424,44 @@ export async function getRecurrentesConCosto(): Promise<{
   tc_fecha: string | null
   tc_es_hoy: boolean
 }> {
+  const supabase = getSupabaseServer()
+
   const [recurrentes, tcInfo] = await Promise.all([
     getRecurrentes(),
     getTipoCambioActual('oficial'),
   ])
   const tc_blue = tcInfo?.valor ?? null
 
+  // Para recurrentes con no_materializar, traer el último gasto vinculado real
+  const noMaterializarIds = recurrentes.filter(r => r.no_materializar).map(r => r.id)
+  const ultimoMontoMap = new Map<string, { monto_original: number; moneda: string }>()
+
+  if (noMaterializarIds.length > 0) {
+    const { data: ultimosGastos } = await supabase
+      .from('gastos')
+      .select('recurrente_id, monto_original, moneda, fecha')
+      .in('recurrente_id', noMaterializarIds)
+      .is('deleted_at', null)
+      .order('fecha', { ascending: false })
+
+    for (const g of ultimosGastos ?? []) {
+      if (g.recurrente_id && !ultimoMontoMap.has(g.recurrente_id)) {
+        ultimoMontoMap.set(g.recurrente_id, {
+          monto_original: g.monto_original,
+          moneda: g.moneda,
+        })
+      }
+    }
+  }
+
   const hoy = new Date()
 
   const recurrentesConCosto: RecurrenteConCosto[] = recurrentes.map(r => {
-    const monto = r.monto_original
+    const ultimoGasto = r.no_materializar ? ultimoMontoMap.get(r.id) : undefined
+    const monto = ultimoGasto?.monto_original ?? r.monto_original
+    const moneda = ultimoGasto?.moneda ?? r.moneda
     const tc = tc_blue ?? 1
-    const montoARS = r.moneda === 'USD' ? monto * tc : monto
+    const montoARS = moneda === 'USD' ? monto * tc : monto
 
     let mensual_ars: number
     if (r.frecuencia === 'anual') mensual_ars = Math.round(montoARS / 12)
@@ -443,7 +471,15 @@ export async function getRecurrentesConCosto(): Promise<{
     const vencimiento = new Date(r.proximo_vencimiento + 'T00:00:00')
     const dias = Math.ceil((vencimiento.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
 
-    return { ...r, mensual_ars, dias_para_vencimiento: dias }
+    return {
+      ...r,
+      mensual_ars,
+      dias_para_vencimiento: dias,
+      ...(ultimoGasto && {
+        ultimo_monto_original: ultimoGasto.monto_original,
+        ultimo_moneda: ultimoGasto.moneda,
+      }),
+    }
   })
 
   const total_mensual_ars = recurrentesConCosto.reduce((sum, r) => sum + r.mensual_ars, 0)

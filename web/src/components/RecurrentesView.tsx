@@ -178,11 +178,14 @@ export default function RecurrentesView({
                     </div>
                     <div className="text-right ml-4">
                       <p className="text-sm font-semibold text-foreground tabular">
-                        {r.moneda === 'USD'
-                          ? `USD ${r.monto_original.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
-                          : formatARS(r.monto_original)}
+                        {(r.ultimo_moneda ?? r.moneda) === 'USD'
+                          ? `USD ${(r.ultimo_monto_original ?? r.monto_original).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+                          : formatARS(r.ultimo_monto_original ?? r.monto_original)}
                       </p>
-                      {(r.frecuencia !== 'mensual' || (r.moneda === 'USD' && tc_blue)) && (
+                      {r.ultimo_monto_original !== undefined && (
+                        <p className="text-xs text-primary/70 mt-0.5 tabular">último cobro</p>
+                      )}
+                      {(r.frecuencia !== 'mensual' || ((r.ultimo_moneda ?? r.moneda) === 'USD' && tc_blue)) && (
                         <p className="text-xs text-muted-foreground mt-0.5 tabular">≈ {formatARS(r.mensual_ars)}/mes</p>
                       )}
                     </div>

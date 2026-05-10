@@ -4,13 +4,14 @@ import { useState, useTransition } from 'react'
 import type { GastoRecurrente } from '@/lib/types'
 import type { RecurrenteConCosto } from '@/lib/queries'
 import RecurrenteModal from './RecurrenteModal'
+import RegistrarCobroModal from './RegistrarCobroModal'
 import { formatARS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { materializarRecurrentesAction } from '@/app/recurrentes/actions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Plus, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, CheckCircle2, ReceiptText } from 'lucide-react'
 
 const FRECUENCIA_LABEL: Record<string, string> = {
   mensual: 'Mensual',
@@ -33,6 +34,7 @@ export default function RecurrentesView({
   tc_blue, tc_fecha, tc_es_hoy, categorias,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
+  const [registrando, setRegistrando] = useState<RecurrenteConCosto | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [materializeResult, setMaterializeResult] = useState<{
@@ -145,12 +147,15 @@ export default function RecurrentesView({
                 const vencido = r.dias_para_vencimiento < 0
 
                 return (
-                  <button
+                  <div
                     key={r.id}
-                    onClick={() => setEditing(r)}
-                    className="w-full flex items-center justify-between px-5 py-4 hover:bg-muted/50 transition-colors text-left"
+                    className="flex items-center justify-between px-5 py-4 hover:bg-muted/50 transition-colors"
                   >
-                    <div className="flex-1 min-w-0">
+                    {/* Área clickeable para editar */}
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="flex-1 min-w-0 text-left"
+                    >
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-medium text-foreground truncate">{r.descripcion}</p>
                         {r.no_materializar && (
@@ -175,21 +180,34 @@ export default function RecurrentesView({
                         <span className="opacity-40">·</span>
                         <span>Día {r.dia_del_mes}</span>
                       </div>
-                    </div>
-                    <div className="text-right ml-4">
-                      <p className="text-sm font-semibold text-foreground tabular">
-                        {(r.ultimo_moneda ?? r.moneda) === 'USD'
-                          ? `USD ${(r.ultimo_monto_original ?? r.monto_original).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
-                          : formatARS(r.ultimo_monto_original ?? r.monto_original)}
-                      </p>
-                      {r.ultimo_monto_original !== undefined && (
-                        <p className="text-xs text-primary/70 mt-0.5 tabular">último cobro</p>
+                    </button>
+
+                    {/* Monto + botón registrar */}
+                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-foreground tabular">
+                          {(r.ultimo_moneda ?? r.moneda) === 'USD'
+                            ? `USD ${(r.ultimo_monto_original ?? r.monto_original).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+                            : formatARS(r.ultimo_monto_original ?? r.monto_original)}
+                        </p>
+                        {r.ultimo_monto_original !== undefined && (
+                          <p className="text-xs text-primary/70 mt-0.5 tabular">último cobro</p>
+                        )}
+                        {(r.frecuencia !== 'mensual' || ((r.ultimo_moneda ?? r.moneda) === 'USD' && tc_blue)) && (
+                          <p className="text-xs text-muted-foreground mt-0.5 tabular">≈ {formatARS(r.mensual_ars)}/mes</p>
+                        )}
+                      </div>
+                      {!r.no_materializar && (
+                        <button
+                          onClick={() => setRegistrando(r)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          title="Registrar cobro"
+                        >
+                          <ReceiptText className="w-4 h-4" />
+                        </button>
                       )}
-                      {(r.frecuencia !== 'mensual' || ((r.ultimo_moneda ?? r.moneda) === 'USD' && tc_blue)) && (
-                        <p className="text-xs text-muted-foreground mt-0.5 tabular">≈ {formatARS(r.mensual_ars)}/mes</p>
-                      )}
                     </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -234,6 +252,9 @@ export default function RecurrentesView({
       )}
       {showNew && (
         <RecurrenteModal categorias={categorias} onClose={() => setShowNew(false)} />
+      )}
+      {registrando && (
+        <RegistrarCobroModal recurrente={registrando} onClose={() => setRegistrando(null)} />
       )}
     </>
   )

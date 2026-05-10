@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
 import { getTipoCambioActual } from '@/lib/queries'
 import { recurrenteSchema } from '@/lib/validation'
+import { subirArchivoDrive } from '@/lib/drive'
 
 function nextDueDate(diaDelMes: number, frecuencia: string): string {
   const hoy = new Date()
@@ -175,4 +176,98 @@ export async function toggleRecurrenteAction(id: string, activo: boolean) {
 
   if (error) throw new Error(error.message)
   revalidatePath('/recurrentes')
+}
+
+export async function registrarCobroAction(formData: FormData): Promise<void> {
+  const recurrenteId = formData.get('recurrenteId') as string
+  const monto = parseFloat(formData.get('monto') as string)
+  const moneda = (formData.get('moneda') as string).toUpperCase()
+  const fecha = formData.get('fecha') as string
+  const descripcion = formData.get('descripcion') as string
+  const categoria = (formData.get('categoria') as string) || null
+  const medio_pago = formData.get('medio_pago') as string
+  const frecuencia = formData.get('frecuencia') as string
+  const proximo_vencimiento = formData.get('proximo_vencimiento') as string
+  const file = formData.get('file') as File | null
+  const tipo_doc = (formData.get('tipo_doc') as string) || 'factura'
+
+  const supabase = getSupabaseServer()
+
+  let monto_ars = monto
+  let tipo_cambio = 1
+  if (moneda === 'USD') {
+    const tcInfo = await getTipoCambioActual('oficial')
+    tipo_cambio = tcInfo?.valor ?? 1
+    monto_ars = monto * tipo_cambio
+  }
+
+  const { data: gasto, error } = await supabase
+    .from('gastos')
+    .insert({
+      descripcion,
+      monto_original: monto,
+      moneda,
+      monto_ars: Math.round(monto_ars),
+      tipo_cambio,
+      tipo_cambio_tipo: moneda === 'USD' ? 'oficial' : 'n/a',
+      categoria,
+      medio_pago,
+      fecha,
+      fuente: 'recurrente_manual',
+      cuotas: 1,
+      cuota_actual: 1,
+      es_recurrente: true,
+      recurrente_id: recurrenteId,
+    })
+    .select('id')
+    .single()
+
+  if (error || !gasto) throw new Error(error?.message ?? 'Error al crear el gasto')
+
+  if (file && file.size > 0) {
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const { driveFileId, driveFileName, driveWebViewLink, driveFolderPath } = await subirArchivoDrive({
+      fileBuffer: buffer,
+      mimeType: file.type || 'application/pdf',
+      comercio: descripcion,
+      fecha,
+      tipo: tipo_doc,
+    })
+    await supabase.from('archivos_drive').insert({
+      gasto_id: gasto.id,
+      tipo: tipo_doc,
+      comercio: descripcion,
+      fecha,
+      categoria,
+      monto,
+      moneda,
+      drive_file_id: driveFileId,
+      drive_file_name: driveFileName,
+      drive_web_view_link: driveWebViewLink,
+      drive_folder_path: driveFolderPath,
+      mime_type: file.type || 'application/pdf',
+    })
+  }
+
+  let nuevaFecha: string
+  if (frecuencia === 'anual') {
+    nuevaFecha = addMonths(proximo_vencimiento, 12)
+  } else if (frecuencia === 'semanal') {
+    const d = new Date(proximo_vencimiento + 'T00:00:00')
+    d.setDate(d.getDate() + 7)
+    nuevaFecha = d.toISOString().split('T')[0]
+  } else {
+    nuevaFecha = addMonths(proximo_vencimiento, 1)
+  }
+
+  await supabase
+    .from('gastos_recurrentes')
+    .update({ proximo_vencimiento: nuevaFecha })
+    .eq('id', recurrenteId)
+
+  revalidatePath('/recurrentes')
+  revalidatePath('/gastos')
+  revalidatePath('/dashboard')
+  revalidatePath('/comprobantes')
 }

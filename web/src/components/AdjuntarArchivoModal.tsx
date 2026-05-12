@@ -196,18 +196,6 @@ export default function AdjuntarArchivoModal({
             </div>
           </div>
 
-          {/* Comercio */}
-          <div>
-            <label className={labelClass}>Comercio / Emisor</label>
-            <input
-              type="text"
-              value={comercioVal}
-              onChange={e => setComercioVal(e.target.value)}
-              placeholder="Ej: Mercado Libre, ARBA..."
-              className={fieldClass}
-            />
-          </div>
-
           {/* Fecha */}
           <div>
             <label className={labelClass}>Fecha del documento</label>

@@ -70,6 +70,7 @@ export async function materializarRecurrentesAction(): Promise<{
       } else {
         await supabase.from('gastos').insert({
           descripcion: r.descripcion,
+          comercio: r.descripcion,
           monto_original: r.monto_original,
           moneda,
           monto_ars,
@@ -205,6 +206,7 @@ export async function registrarCobroAction(formData: FormData): Promise<void> {
     .from('gastos')
     .insert({
       descripcion,
+      comercio: descripcion,
       monto_original: monto,
       moneda,
       monto_ars: Math.round(monto_ars),

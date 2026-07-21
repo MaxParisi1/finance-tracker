@@ -132,23 +132,46 @@ def vincular_gasto_recurrente(gasto_id: str, recurrente_id: str) -> None:
     logger.info("Gasto %s vinculado a recurrente %s", gasto_id, recurrente_id)
 
 
-def avanzar_proximo_vencimiento(recurrente_id: str, frecuencia: str, proximo_actual: str) -> None:
+def _siguiente_vencimiento(d: date, frecuencia: str) -> date:
+    """Avanza una fecha un período según la frecuencia, con clamp de fin de mes."""
     import calendar as _cal
-    d = date.fromisoformat(str(proximo_actual))
+    from datetime import timedelta
     if frecuencia == "anual":
-        nueva = d.replace(year=d.year + 1)
-    elif frecuencia == "semanal":
-        from datetime import timedelta
-        nueva = d + timedelta(days=7)
-    else:
-        mes = d.month + 1
-        anio = d.year
-        if mes > 12:
-            mes, anio = 1, anio + 1
-        nueva = d.replace(year=anio, month=mes, day=min(d.day, _cal.monthrange(anio, mes)[1]))
+        return d.replace(year=d.year + 1, day=min(d.day, _cal.monthrange(d.year + 1, d.month)[1]))
+    if frecuencia == "semanal":
+        return d + timedelta(days=7)
+    mes, anio = (d.month + 1, d.year) if d.month < 12 else (1, d.year + 1)
+    return d.replace(year=anio, month=mes, day=min(d.day, _cal.monthrange(anio, mes)[1]))
+
+
+def avanzar_proximo_vencimiento(
+    recurrente_id: str, frecuencia: str, proximo_actual: str, fecha_pago: str | None = None
+) -> None:
+    """
+    Avanza proximo_vencimiento al menos un período. Si el pago llegó tarde
+    (proximo_actual quedó en el pasado), sigue avanzando hasta superar la fecha
+    del pago, evitando que la ventana de matching futura quede desalineada.
+    """
+    frecuencia = frecuencia or "mensual"
+    d = date.fromisoformat(str(proximo_actual))
+    ancla = date.fromisoformat(str(fecha_pago)) if fecha_pago else date.today()
+
+    nueva = _siguiente_vencimiento(d, frecuencia)
+    guard = 0
+    while nueva <= ancla and guard < 120:
+        nueva = _siguiente_vencimiento(nueva, frecuencia)
+        guard += 1
+
     client = get_client()
     client.table("gastos_recurrentes").update({"proximo_vencimiento": nueva.isoformat()}).eq("id", recurrente_id).execute()
     logger.info("Recurrente %s → proximo_vencimiento=%s", recurrente_id, nueva)
+
+
+def actualizar_monto_recurrente(recurrente_id: str, nuevo_monto: float) -> None:
+    """Actualiza el monto esperado del recurrente al último observado."""
+    client = get_client()
+    client.table("gastos_recurrentes").update({"monto_original": nuevo_monto}).eq("id", recurrente_id).execute()
+    logger.info("Recurrente %s → monto_original=%s", recurrente_id, nuevo_monto)
 
 
 def obtener_aliases_recurrentes() -> dict[str, str]:

@@ -205,6 +205,8 @@ async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
                 matcher.confirmar_vinculacion,
                 gasto["id"], candidato.recurrente, comercio,
                 guardar_alias=(candidato.metodo != "alias"),
+                nuevo_monto=gasto.get("monto_original"),
+                fecha_pago=gasto.get("fecha"),
             )
             rec_esc = _escape_md(candidato.recurrente["descripcion"])
             com_esc = _escape_md(comercio)

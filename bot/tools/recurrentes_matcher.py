@@ -24,13 +24,14 @@ from bot.gemini_client import generate_with_fallback
 logger = logging.getLogger(__name__)
 
 FUZZY_AUTO = 85
-FUZZY_GEMINI = 60
-MONTO_TOL = 0.20
-FECHA_WINDOW = 12  # días
+FUZZY_GEMINI = 55       # umbral para dejar que Gemini arbitre (antes 60)
+MONTO_TOL = 0.20        # variación "cómoda"; dentro de esto no se penaliza
+MONTO_TOL_HARD = 0.60   # rechazo duro solo si el monto difiere muchísimo
+FECHA_WINDOW = 25       # días; ventana holgada para cadencias irregulares (antes 12)
 
 # Confirmaciones pendientes de respuesta del usuario.
-# key: "{gasto_id[:8]}:{rec_id[:8]}"  →  (gasto_id, rec_id, comercio_norm)
-_pending: dict[str, tuple[str, str, str]] = {}
+# key: "{gasto_id[:8]}:{rec_id[:8]}"  →  (gasto_id, rec_id, comercio, monto, fecha)
+_pending: dict[str, tuple[str, str, str, float, str | None]] = {}
 
 
 # ──────────────────────────────────────────────
@@ -60,17 +61,27 @@ def _normalizar(text: str) -> str:
 # Filtros duros
 # ──────────────────────────────────────────────
 
-def _pasa_filtros_duros(gasto: dict, rec: dict) -> bool:
+def _motivo_rechazo(gasto: dict, rec: dict, *, es_alias: bool = False) -> str | None:
+    """
+    Devuelve None si el recurrente es candidato viable, o un string con el
+    motivo del descarte (para logging/observabilidad).
+
+    Los alias aprendidos solo exigen coincidencia de moneda: se confía en el
+    aprendizaje previo y se ignoran las variaciones de monto/fecha.
+    """
     mon_g = (gasto.get('moneda') or 'ARS').upper()
     mon_r = (rec.get('moneda') or 'ARS').upper()
     if mon_g != mon_r:
-        return False
+        return f"moneda {mon_g}!={mon_r}"
+
+    if es_alias:
+        return None
 
     try:
         mg = float(gasto.get('monto_original') or 0)
         mr = float(rec.get('monto_original') or 0)
-        if mr > 0 and abs(mg - mr) / mr > MONTO_TOL:
-            return False
+        if mr > 0 and abs(mg - mr) / mr > MONTO_TOL_HARD:
+            return f"monto {mg} vs esperado {mr} (>{int(MONTO_TOL_HARD * 100)}%)"
     except (ValueError, ZeroDivisionError):
         pass
 
@@ -80,11 +91,11 @@ def _pasa_filtros_duros(gasto: dict, rec: dict) -> bool:
             dg = date.fromisoformat(str(gasto.get('fecha') or date.today()))
             dr = date.fromisoformat(str(prox))
             if abs((dg - dr).days) > FECHA_WINDOW:
-                return False
+                return f"fecha {dg} fuera de ±{FECHA_WINDOW}d de {dr}"
         except ValueError:
             pass
 
-    return True
+    return None
 
 
 # ──────────────────────────────────────────────
@@ -130,42 +141,83 @@ def encontrar_candidato_db(gasto: dict) -> CandidatoMatch | None:
     """
     recurrentes = queries.obtener_recurrentes_activos()
     if not recurrentes:
+        logger.info("Match recurrente: no hay recurrentes activos")
         return None
 
     aliases = queries.obtener_aliases_recurrentes()
     comercio = gasto.get('comercio') or gasto.get('descripcion') or ''
     comercio_norm = _normalizar(comercio)
 
-    # Capa 1: alias exacto
+    logger.info(
+        "Match recurrente: comercio=%r norm=%r monto=%s %s fecha=%s | %d activos",
+        comercio, comercio_norm, gasto.get('monto_original'),
+        gasto.get('moneda'), gasto.get('fecha'), len(recurrentes),
+    )
+
+    # Capa 1: alias exacto (bypass de monto/fecha; solo exige moneda)
     if comercio_norm in aliases:
         rec_id = aliases[comercio_norm]
         rec = next((r for r in recurrentes if str(r['id']) == rec_id), None)
-        if rec and _pasa_filtros_duros(gasto, rec):
-            return CandidatoMatch(recurrente=rec, confianza=1.0, metodo='alias')
+        if rec is None:
+            logger.info("  alias '%s' apunta a recurrente %s inactivo/eliminado", comercio_norm, rec_id)
+        else:
+            motivo = _motivo_rechazo(gasto, rec, es_alias=True)
+            if motivo is None:
+                logger.info("  → alias exacto → recurrente %s (%s)", rec_id, rec.get('descripcion'))
+                return CandidatoMatch(recurrente=rec, confianza=1.0, metodo='alias')
+            logger.info("  alias '%s' descartado: %s", comercio_norm, motivo)
 
-    # Candidatos que pasan filtros duros
-    candidatos = [r for r in recurrentes if _pasa_filtros_duros(gasto, r)]
+    # Candidatos que pasan filtros duros (logueando cada descarte)
+    candidatos: list[dict] = []
+    for r in recurrentes:
+        motivo = _motivo_rechazo(gasto, r)
+        if motivo is None:
+            candidatos.append(r)
+        else:
+            logger.debug("  descartado %r: %s", r.get('descripcion'), motivo)
     if not candidatos:
+        logger.info("  → sin candidatos tras filtros duros")
         return None
 
-    # Capa 2: fuzzy
-    scored = sorted(
-        ((fuzz.ratio(comercio_norm, _normalizar(r.get('descripcion', ''))), r) for r in candidatos),
-        reverse=True,
-    )
+    # Alias conocidos por recurrente, para enriquecer el fuzzy con lo aprendido
+    aliases_por_rec: dict[str, list[str]] = {}
+    for alias_norm, rid in aliases.items():
+        aliases_por_rec.setdefault(str(rid), []).append(alias_norm)
+
+    def _mejor_score(r: dict) -> int:
+        objetivos = [_normalizar(r.get('descripcion', ''))]
+        objetivos += aliases_por_rec.get(str(r['id']), [])
+        objetivos = [o for o in objetivos if o]
+        if not objetivos:
+            return 0
+        return max(
+            max(
+                fuzz.ratio(comercio_norm, o),
+                fuzz.token_set_ratio(comercio_norm, o),
+                fuzz.partial_ratio(comercio_norm, o),
+            )
+            for o in objetivos
+        )
+
+    # Capa 2: fuzzy (key= evita comparar dicts en empates de score)
+    scored = sorted(((_mejor_score(r), r) for r in candidatos), key=lambda t: t[0], reverse=True)
     best_score, best_rec = scored[0]
+    logger.info("  mejor fuzzy=%d → %r", best_score, best_rec.get('descripcion'))
 
     if best_score >= FUZZY_AUTO:
+        logger.info("  → auto-vinculado por fuzzy (score=%d)", best_score)
         return CandidatoMatch(recurrente=best_rec, confianza=best_score / 100, metodo='fuzzy')
 
-    # Capas 3-4: Gemini sólo si hay candidato razonablemente cercano
+    # Capas 3-4: Gemini solo si hay candidato razonablemente cercano
     if best_score >= FUZZY_GEMINI:
         conf = _score_gemini(gasto, best_rec)
+        logger.info("  Gemini confianza=%.2f", conf)
         if conf >= 0.80:
             return CandidatoMatch(recurrente=best_rec, confianza=conf, metodo='gemini')
         if conf >= 0.50:
             return CandidatoMatch(recurrente=best_rec, confianza=conf, metodo='usuario_pendiente')
 
+    logger.info("  → sin match (mejor score=%d < %d)", best_score, FUZZY_GEMINI)
     return None
 
 
@@ -173,10 +225,32 @@ def encontrar_candidato_db(gasto: dict) -> CandidatoMatch | None:
 # Vinculación
 # ──────────────────────────────────────────────
 
-def confirmar_vinculacion(gasto_id: str, rec: dict, comercio: str, guardar_alias: bool, confirmado_usuario: bool = False) -> None:
-    """Vincula el gasto al recurrente y avanza proximo_vencimiento."""
+def confirmar_vinculacion(
+    gasto_id: str,
+    rec: dict,
+    comercio: str,
+    guardar_alias: bool,
+    confirmado_usuario: bool = False,
+    nuevo_monto: float | None = None,
+    fecha_pago: str | None = None,
+) -> None:
+    """
+    Vincula el gasto al recurrente, actualiza su monto esperado al último
+    observado y avanza proximo_vencimiento (anclado a la fecha del pago).
+    """
     queries.vincular_gasto_recurrente(gasto_id, rec['id'])
-    queries.avanzar_proximo_vencimiento(rec['id'], rec.get('frecuencia', 'mensual'), rec['proximo_vencimiento'])
+
+    if nuevo_monto is not None:
+        try:
+            queries.actualizar_monto_recurrente(rec['id'], float(nuevo_monto))
+        except (ValueError, TypeError):
+            logger.warning("nuevo_monto inválido (%r), no se actualizó el recurrente %s", nuevo_monto, rec['id'])
+
+    if rec.get('proximo_vencimiento'):
+        queries.avanzar_proximo_vencimiento(
+            rec['id'], rec.get('frecuencia', 'mensual'), rec['proximo_vencimiento'], fecha_pago=fecha_pago
+        )
+
     if guardar_alias and comercio:
         queries.upsert_alias_recurrente(rec['id'], _normalizar(comercio), confirmado_por_usuario=confirmado_usuario)
 
@@ -196,7 +270,7 @@ async def solicitar_confirmacion_telegram(bot, chat_id: int, gasto: dict, candid
     rec_id = candidato.recurrente['id']
     comercio = gasto.get('comercio') or gasto.get('descripcion') or ''
     key = _pending_key(gasto_id, rec_id)
-    _pending[key] = (gasto_id, rec_id, comercio)
+    _pending[key] = (gasto_id, rec_id, comercio, gasto.get('monto_original', 0), gasto.get('fecha'))
 
     comercio = gasto.get('comercio') or gasto.get('descripcion') or '?'
     monto = gasto.get('monto_original', 0)
@@ -239,7 +313,7 @@ async def procesar_callback(query) -> str:
     if ids is None:
         return "Esta confirmación ya fue procesada o expiró."
 
-    gasto_id, rec_id, comercio = ids
+    gasto_id, rec_id, comercio, monto, fecha = ids
 
     if accion == 'n':
         return "Entendido, no se vinculó."
@@ -252,6 +326,9 @@ async def procesar_callback(query) -> str:
         return "No encontré el recurrente, puede haber sido eliminado."
 
     guardar_alias = (accion == 'a')
-    confirmar_vinculacion(gasto_id, rec, comercio=comercio, guardar_alias=guardar_alias, confirmado_usuario=guardar_alias)
+    confirmar_vinculacion(
+        gasto_id, rec, comercio=comercio, guardar_alias=guardar_alias,
+        confirmado_usuario=guardar_alias, nuevo_monto=monto, fecha_pago=fecha,
+    )
     sufijo = " (alias guardado para próximas veces)" if guardar_alias else ""
     return f"✅ Vinculado a *{rec['descripcion']}*{sufijo}"

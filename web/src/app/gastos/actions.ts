@@ -68,6 +68,32 @@ export async function updateGastoAction(
   revalidatePath('/comprobantes')
 }
 
+/**
+ * Avanza una fecha (YYYY-MM-DD) un período según la frecuencia, con clamp de
+ * fin de mes. Trabaja en UTC para evitar corrimientos por zona horaria.
+ */
+function siguienteVencimiento(fecha: string, frecuencia: string): string {
+  const [y, m, d] = fecha.split('-').map(Number)
+  let ny = y
+  let nm = m
+  if (frecuencia === 'anual') {
+    ny = y + 1
+  } else if (frecuencia === 'semanal') {
+    const dt = new Date(Date.UTC(y, m - 1, d))
+    dt.setUTCDate(dt.getUTCDate() + 7)
+    return dt.toISOString().split('T')[0]
+  } else {
+    nm = m + 1
+    if (nm > 12) {
+      nm = 1
+      ny = y + 1
+    }
+  }
+  const ultimoDia = new Date(Date.UTC(ny, nm, 0)).getUTCDate() // día 0 del mes siguiente = último del mes
+  const dt = new Date(Date.UTC(ny, nm - 1, Math.min(d, ultimoDia)))
+  return dt.toISOString().split('T')[0]
+}
+
 export async function vincularRecurrenteAction(
   gastoId: string,
   recurrenteId: string | null,
@@ -102,28 +128,45 @@ export async function vincularRecurrenteAction(
     }
   }
 
-  // Avanzar proximo_vencimiento del recurrente
+  // Datos del gasto vinculado: sirven para actualizar el monto esperado y
+  // anclar el avance de la fecha al pago real.
+  const { data: gasto } = await supabase
+    .from('gastos')
+    .select('monto_original, fecha')
+    .eq('id', gastoId)
+    .single()
+
   const { data: rec } = await supabase
     .from('gastos_recurrentes')
     .select('frecuencia, proximo_vencimiento')
     .eq('id', recurrenteId)
     .single()
 
+  const updates: { monto_original?: number; proximo_vencimiento?: string } = {}
+
+  // Actualizar el monto esperado al último observado (igual que el bot)
+  if (gasto?.monto_original != null) {
+    updates.monto_original = gasto.monto_original
+  }
+
+  // Avanzar proximo_vencimiento; si el pago llegó tarde, seguir avanzando
+  // hasta superar la fecha del pago para no desalinear la ventana futura.
   if (rec?.proximo_vencimiento) {
-    const [y, m, d] = rec.proximo_vencimiento.split('-').map(Number)
-    let nuevaFecha: string
-    if (rec.frecuencia === 'anual') {
-      nuevaFecha = new Date(y + 1, m - 1, d).toISOString().split('T')[0]
-    } else if (rec.frecuencia === 'semanal') {
-      const dt = new Date(y, m - 1, d)
-      dt.setDate(dt.getDate() + 7)
-      nuevaFecha = dt.toISOString().split('T')[0]
-    } else {
-      nuevaFecha = new Date(y, m, d).toISOString().split('T')[0] // JS auto-wraps month
+    const frecuencia = rec.frecuencia ?? 'mensual'
+    const ancla = gasto?.fecha ?? new Date().toISOString().split('T')[0]
+    let nueva = siguienteVencimiento(rec.proximo_vencimiento, frecuencia)
+    let guard = 0
+    while (nueva <= ancla && guard < 120) {
+      nueva = siguienteVencimiento(nueva, frecuencia)
+      guard++
     }
+    updates.proximo_vencimiento = nueva
+  }
+
+  if (Object.keys(updates).length > 0) {
     await supabase
       .from('gastos_recurrentes')
-      .update({ proximo_vencimiento: nuevaFecha })
+      .update(updates)
       .eq('id', recurrenteId)
   }
 

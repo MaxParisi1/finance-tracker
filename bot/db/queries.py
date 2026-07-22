@@ -62,6 +62,23 @@ def obtener_gastos(filtros: dict) -> list[dict]:
     return res.data
 
 
+def existe_gasto_con_email(message_id: str) -> bool:
+    """
+    True si ya existe un gasto importado desde ese email de Gmail.
+    Idempotencia: evita duplicados si el proceso muere entre guardar_gasto()
+    y mark_as_read() y el email se reprocesa en el siguiente ciclo.
+    """
+    client = get_client()
+    res = (
+        client.table("gastos")
+        .select("id")
+        .eq("email_message_id", message_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
+
+
 def obtener_gasto_por_id(gasto_id: str) -> dict | None:
     client = get_client()
     res = (

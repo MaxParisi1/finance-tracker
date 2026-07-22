@@ -75,7 +75,7 @@ export default async function AnalyticsPage() {
             {equivalenteUSD !== null && (
               <Card>
                 <CardContent className="py-4">
-                  <p className="text-xs text-muted-foreground font-medium">Equiv. USD blue</p>
+                  <p className="text-xs text-muted-foreground font-medium">Equiv. USD oficial</p>
                   <p className="text-lg font-bold text-foreground mt-1 tabular">
                     USD {equivalenteUSD.toLocaleString('es-AR')}
                   </p>

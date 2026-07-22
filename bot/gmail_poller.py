@@ -15,12 +15,19 @@ from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_N
 from bot.gemini_client import generate_with_fallback
 from bot.tools.gastos import guardar_gasto, historial_comercio
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
-from bot.db.queries import obtener_categorias_activas
+from bot.db.queries import obtener_categorias_activas, existe_gasto_con_email
 from bot.tools import recurrentes_matcher as matcher
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 900  # 15 minutos
+
+# Ciclos consecutivos fallidos (fetch de Gmail) antes de auto-alertar por Telegram.
+ALERT_THRESHOLD = 3  # ~45 min de caída sostenida
+
+# Emails ya notificados como "no procesados" en este proceso, para no spamear
+# la misma alerta cada 15 minutos mientras el email siga sin leer.
+_emails_alertados: set[str] = set()
 
 # Patrón para emails de Prisma (Visa).
 # Ancla en "$ monto en el establecimiento" para ser agnóstico al tipo
@@ -86,7 +93,13 @@ def _parse_prisma_email(email: dict) -> dict | None:
 
 
 def _parse_email_with_gemini(email: dict) -> dict | None:
-    """Usa Gemini para extraer datos de transacción de un email bancario genérico."""
+    """
+    Usa Gemini para extraer datos de transacción de un email bancario genérico.
+
+    Devuelve None si el email legítimamente no es una transacción.
+    Lanza excepción ante un fallo transitorio (cuota/red/JSON inválido): el caller
+    debe dejar el email sin leer para reintentarlo y avisar al usuario.
+    """
     categorias = [c["nombre"] for c in obtener_categorias_activas()]
     categorias_str = ", ".join(categorias) if categorias else "otros"
 
@@ -125,14 +138,12 @@ Cuerpo:
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
 
-    try:
-        data = json.loads(response.text)
-        if not data.get("es_transaccion"):
-            return None
-        return data
-    except Exception:
-        logger.warning(f"No se pudo parsear respuesta de Gemini: {response.text[:200]}")
+    # Un JSON inválido es un fallo transitorio: propagamos para reintentar y avisar,
+    # en vez de descartar silenciosamente un gasto real.
+    data = json.loads(response.text)
+    if not data.get("es_transaccion"):
         return None
+    return data
 
 
 def _enriquecer_prisma(parsed: dict) -> dict:
@@ -229,17 +240,53 @@ def _escape_md(text: str) -> str:
     return text.strip()
 
 
-async def poll_gmail_once(bot, chat_id: int) -> None:
-    """Revisa la etiqueta Consumos (emails genéricos) y procesa los nuevos."""
+async def _alertar_email_no_procesado(bot, chat_id: int, email: dict) -> None:
+    """Avisa (una sola vez por email) que un email quedó sin procesar por un fallo transitorio."""
+    eid = email["id"]
+    if eid in _emails_alertados:
+        return
+    _emails_alertados.add(eid)
+    subject = _escape_md(email.get("subject", "(sin asunto)"))
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"⚠️ *Email sin procesar*\n"
+                f"No pude extraer la transacción (error temporal de IA).\n"
+                f"• Asunto: {subject}\n"
+                f"Quedó sin leer para reintentar en el próximo ciclo."
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("No pude enviar alerta de email no procesado")
+
+
+async def poll_gmail_once(bot, chat_id: int) -> bool:
+    """
+    Revisa la etiqueta Consumos (emails genéricos) y procesa los nuevos.
+    Devuelve False si falló el fetch a Gmail (señal de salud del poller).
+    """
     try:
         emails = await asyncio.to_thread(get_unread_bank_emails)
     except Exception:
         logger.exception("Error al consultar Gmail (Consumos)")
-        return
+        return False
 
     for email in emails:
         try:
-            data = await asyncio.to_thread(_parse_email_with_gemini, email)
+            # Idempotencia: si este email ya generó un gasto, solo marcar leído.
+            if await asyncio.to_thread(existe_gasto_con_email, email["id"]):
+                logger.info("Email %s ya importado; se omite (idempotencia)", email["id"])
+                await asyncio.to_thread(mark_as_read, email["id"])
+                continue
+
+            try:
+                data = await asyncio.to_thread(_parse_email_with_gemini, email)
+            except Exception:
+                logger.exception("Fallo transitorio parseando email %s (no se marca leído)", email["id"])
+                await _alertar_email_no_procesado(bot, chat_id, email)
+                continue
 
             if not data:
                 await asyncio.to_thread(mark_as_read, email["id"])
@@ -256,6 +303,7 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
                 comercio=data.get("comercio"),
                 fuente="gmail_auto",
                 tarjeta=data.get("tarjeta"),
+                email_message_id=email["id"],
             )
 
             await _intentar_match_recurrente(bot, chat_id, gasto_guardado)
@@ -275,32 +323,46 @@ async def poll_gmail_once(bot, chat_id: int) -> None:
         except Exception:
             logger.exception(f"Error procesando email {email['id']}")
 
+    return True
 
-async def poll_visa_once(bot, chat_id: int) -> None:
-    """Revisa la etiqueta Consumos_visa (notificaciones Prisma) y procesa los nuevos."""
+
+async def poll_visa_once(bot, chat_id: int) -> bool:
+    """
+    Revisa la etiqueta Consumos_visa (notificaciones Prisma) y procesa los nuevos.
+    Devuelve False si falló el fetch a Gmail (señal de salud del poller).
+    """
     try:
         emails = await asyncio.to_thread(get_unread_bank_emails, LABEL_NAME_VISA)
     except Exception:
         logger.exception("Error al consultar Gmail (Consumos_visa)")
-        return
+        return False
 
     for email in emails:
         try:
+            # Idempotencia: si este email ya generó un gasto, solo marcar leído.
+            if await asyncio.to_thread(existe_gasto_con_email, email["id"]):
+                logger.info("Email Visa %s ya importado; se omite (idempotencia)", email["id"])
+                await asyncio.to_thread(mark_as_read, email["id"])
+                continue
+
             parsed = await asyncio.to_thread(_parse_prisma_email, email)
 
             if parsed is None:
-                # Formato desconocido: notificar y NO marcar como leído para revisión manual
-                subject = _escape_md(email.get("subject", "(sin asunto)"))
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=(
-                        f"⚠️ *Email Visa sin parsear*\n"
-                        f"No reconocí el formato de un email en Consumos\\_visa.\n"
-                        f"• Asunto: {subject}\n"
-                        f"Revisalo manualmente en Gmail."
-                    ),
-                    parse_mode="Markdown",
-                )
+                # Formato desconocido: notificar (una sola vez) y NO marcar como leído
+                # para revisión manual.
+                if email["id"] not in _emails_alertados:
+                    _emails_alertados.add(email["id"])
+                    subject = _escape_md(email.get("subject", "(sin asunto)"))
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"⚠️ *Email Visa sin parsear*\n"
+                            f"No reconocí el formato de un email en Consumos\\_visa.\n"
+                            f"• Asunto: {subject}\n"
+                            f"Revisalo manualmente en Gmail."
+                        ),
+                        parse_mode="Markdown",
+                    )
                 continue
 
             if parsed.get("_denied"):
@@ -328,6 +390,7 @@ async def poll_visa_once(bot, chat_id: int) -> None:
                 notas=enriquecido["notas"],
                 fuente="gmail_visa",
                 tarjeta=tarjeta_nombre,
+                email_message_id=email["id"],
             )
 
             await _intentar_match_recurrente(bot, chat_id, gasto_guardado)
@@ -351,17 +414,54 @@ async def poll_visa_once(bot, chat_id: int) -> None:
         except Exception:
             logger.exception(f"Error procesando email Visa {email['id']}")
 
+    return True
+
 
 async def start_gmail_polling(bot, chat_id: int) -> None:
     """Arranca los dos loops de polling en paralelo."""
     logger.info("Gmail pollers iniciados (intervalo: %ds)", POLL_INTERVAL)
     await asyncio.gather(
-        _loop_poll(bot, chat_id, poll_gmail_once),
-        _loop_poll(bot, chat_id, poll_visa_once),
+        _loop_poll(bot, chat_id, poll_gmail_once, "Consumos"),
+        _loop_poll(bot, chat_id, poll_visa_once, "Consumos_visa"),
     )
 
 
-async def _loop_poll(bot, chat_id: int, poll_fn) -> None:
+async def _safe_alert(bot, chat_id: int, texto: str) -> None:
+    """Envía una alerta de estado sin dejar que un fallo de red tumbe el loop."""
+    try:
+        await bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
+    except Exception:
+        logger.exception("No pude enviar alerta de estado del poller")
+
+
+async def _loop_poll(bot, chat_id: int, poll_fn, nombre: str) -> None:
+    """
+    Corre poll_fn en loop. Cuenta ciclos consecutivos fallidos y auto-alerta por
+    Telegram al superar ALERT_THRESHOLD (dead-man's switch), avisando también al recuperar.
+    """
+    fallos = 0
+    alertado = False
     while True:
-        await poll_fn(bot, chat_id)
+        try:
+            ok = await poll_fn(bot, chat_id)
+        except Exception:
+            logger.exception("Error inesperado en poller %s", nombre)
+            ok = False
+
+        if ok:
+            if alertado:
+                await _safe_alert(bot, chat_id, f"✅ Poller *{nombre}* recuperado.")
+                alertado = False
+            fallos = 0
+        else:
+            fallos += 1
+            if fallos >= ALERT_THRESHOLD and not alertado:
+                minutos = fallos * POLL_INTERVAL // 60
+                await _safe_alert(
+                    bot, chat_id,
+                    f"⚠️ Poller *{nombre}* falló {fallos} ciclos seguidos (~{minutos} min).\n"
+                    f"Revisá el token de Gmail, la cuota de Gemini o los logs del servidor.",
+                )
+                alertado = True
+
         await asyncio.sleep(POLL_INTERVAL)

@@ -4,7 +4,7 @@ import AnimatedSummaryCard from '@/components/AnimatedSummaryCard'
 import ExpenseTable from '@/components/ExpenseTable'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BlurFade } from '@/components/magicui/blur-fade'
-import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getCuotasActivas, getPlanesCuotaActivos } from '@/lib/queries'
+import { getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto, getCuotasActivas, getPlanesCuotaActivos, getPresupuestosConGasto } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -18,15 +18,21 @@ export default async function DashboardPage() {
   const anioAnterior = mes === 1 ? anio - 1 : anio
 
   const categorias = await getCategorias()
-  const [resumenActual, resumenAnterior, recientes, recurrentes, cuotasActivas, planesCuota] = await Promise.all([
+  const [resumenActual, resumenAnterior, recientes, recurrentes, cuotasActivas, planesCuota, presupuestos] = await Promise.all([
     getResumenMes(mes, anio, categorias),
     getResumenMes(mesAnterior, anioAnterior, categorias),
     getGastosRecientes(10),
     getRecurrentesConCosto(),
     getCuotasActivas(),
     getPlanesCuotaActivos(),
+    getPresupuestosConGasto(mes, anio),
   ])
   const tcBlue = recurrentes.tc_blue
+
+  // Solo presupuestos con límite > 0, ordenados por % usado (los más ajustados primero)
+  const presupuestosActivos = presupuestos
+    .filter(p => p.monto_limite > 0)
+    .sort((a, b) => b.pct - a.pct)
 
   const variacion =
     resumenAnterior.total_ars > 0
@@ -139,7 +145,20 @@ export default async function DashboardPage() {
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="space-y-3">
-                    {resumenActual.por_categoria.slice(0, 7).map(cat => {
+                    {(() => {
+                      const TOP_N = 7
+                      const top = resumenActual.por_categoria.slice(0, TOP_N)
+                      const resto = resumenActual.por_categoria.slice(TOP_N)
+                      if (resto.length > 0) {
+                        top.push({
+                          categoria: 'Otras categorías',
+                          total_ars: resto.reduce((s, c) => s + c.total_ars, 0),
+                          cantidad: resto.reduce((s, c) => s + c.cantidad, 0),
+                          color: '#9E9E9E',
+                        })
+                      }
+                      return top
+                    })().map(cat => {
                       const pct =
                         resumenActual.total_ars > 0
                           ? Math.round((cat.total_ars / resumenActual.total_ars) * 100)
@@ -283,6 +302,51 @@ export default async function DashboardPage() {
                 )
               })}
             </div>
+          </Card>
+          </BlurFade>
+          )}
+
+          {/* Presupuestos del mes */}
+          {presupuestosActivos.length > 0 && (
+          <BlurFade delay={0.18}>
+          <Card className="mb-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Presupuestos · {monthLabel(mes, anio)}</CardTitle>
+                <a href="/presupuestos" className="text-sm text-primary hover:text-primary/80 transition-colors">
+                  Administrar →
+                </a>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="space-y-3">
+                {presupuestosActivos.map(p => {
+                  const pctBar = Math.min(p.pct, 100)
+                  const estado =
+                    p.pct >= 100 ? 'bg-destructive'
+                    : p.pct >= 80 ? 'bg-warning'
+                    : 'bg-success'
+                  const textoEstado =
+                    p.pct >= 100 ? 'text-destructive'
+                    : p.pct >= 80 ? 'text-warning'
+                    : 'text-muted-foreground'
+                  return (
+                    <div key={p.id}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-foreground/80">{p.categoria}</span>
+                        <span className="font-medium text-foreground tabular">
+                          {formatARS(p.gastado)} / {formatARS(p.monto_limite)}{' '}
+                          <span className={cn('font-normal', textoEstado)}>({p.pct}%)</span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', estado)} style={{ width: `${pctBar}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
           </Card>
           </BlurFade>
           )}

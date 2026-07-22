@@ -371,11 +371,18 @@ async function ejecutarFuncion(nombre: string, args: Record<string, any>): Promi
 // Handler
 // ──────────────────────────────────────────────
 
-/** Suma exactamente un mes a una fecha YYYY-MM-DD */
+/**
+ * Suma exactamente un mes a una fecha YYYY-MM-DD, clampeando el día al último
+ * del mes destino (31-ene → 28/29-feb), igual que `_siguiente_mes` en el bot.
+ * Se construye el string a mano para evitar corrimientos por zona horaria (toISOString → UTC).
+ */
 function addOneMonth(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
-  // new Date(y, m, d): month es 0-indexed, así que m == siguiente mes
-  return new Date(y, m, d).toISOString().split('T')[0]
+  const year = m === 12 ? y + 1 : y
+  const month = m === 12 ? 1 : m + 1 // 1-indexed
+  const ultimoDia = new Date(year, month, 0).getDate() // día 0 del mes+1 = último día del mes destino
+  const dia = Math.min(d, ultimoDia)
+  return `${year}-${String(month).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
 }
 
 export async function POST(req: NextRequest) {

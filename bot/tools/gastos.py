@@ -38,6 +38,7 @@ def guardar_gasto(
     fuente: str = "telegram_texto",
     tipo_cambio_tipo: str = "oficial",
     tarjeta: str | None = None,
+    email_message_id: str | None = None,
 ) -> dict:
     """
     Guarda un gasto en la base de datos.
@@ -87,6 +88,8 @@ def guardar_gasto(
         gasto["notas"] = notas
     if tarjeta:
         gasto["tarjeta"] = tarjeta
+    if email_message_id:
+        gasto["email_message_id"] = email_message_id
 
     if moneda == "USD":
         conversion = convertir_usd_a_ars(monto, tipo_cambio_tipo)
@@ -108,6 +111,9 @@ def guardar_gasto(
         for n in range(2, cuotas + 1):
             fecha_cuota = _siguiente_mes(fecha_cuota)
             cuota_extra = {**gasto, "fecha": fecha_cuota.isoformat(), "cuota_actual": n}
+            # El índice único de email_message_id solo admite una fila por email;
+            # las cuotas siguientes no lo llevan.
+            cuota_extra.pop("email_message_id", None)
             queries.insertar_gasto(cuota_extra)
 
     return primer_registro

@@ -10,27 +10,26 @@ import {
   FileText,
   BarChart3,
   RefreshCw,
-  TrendingUp,
   ChevronLeft,
   Sun,
   Moon,
   Layers,
   History,
+  Plus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { AnimatedGradientText } from '@/components/magicui/animated-gradient-text'
 
 const NAV_ITEMS = [
-  { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard, gradient: 'from-blue-500 to-indigo-600' },
-  { href: '/gastos',       label: 'Gastos',        icon: CreditCard,      gradient: 'from-indigo-500 to-violet-600' },
-  { href: '/comprobantes', label: 'Comprobantes',  icon: FileText,        gradient: 'from-violet-500 to-purple-600' },
-  { href: '/analytics',   label: 'Analíticas',    icon: BarChart3,       gradient: 'from-purple-500 to-pink-600' },
-  { href: '/recurrentes', label: 'Recurrentes',   icon: RefreshCw,       gradient: 'from-pink-500 to-rose-600' },
-  { href: '/cuotas',      label: 'Cuotas',         icon: Layers,          gradient: 'from-rose-500 to-orange-500' },
-  { href: '/historico',  label: 'Histórico',      icon: History,         gradient: 'from-orange-500 to-amber-500' },
+  { href: '/dashboard',    label: 'Panel',        icon: LayoutDashboard },
+  { href: '/recurrentes',  label: 'Fijos',        icon: RefreshCw, badge: true },
+  { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
+  { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
+  { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
+  { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
+  { href: '/historico',    label: 'Histórico',    icon: History },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ pendientes }: { pendientes?: number }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const { theme, setTheme } = useTheme()
@@ -40,115 +39,96 @@ export default function Sidebar() {
   return (
     <aside
       className={cn(
-        'hidden md:flex flex-col min-h-screen transition-all duration-300 ease-in-out',
-        'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900',
-        'border-r border-slate-700/50',
-        collapsed ? 'w-[72px]' : 'w-56'
+        'hidden md:flex flex-col min-h-screen sticky top-0 self-start transition-[width] duration-300 ease-in-out',
+        'bg-card border-r border-border',
+        collapsed ? 'w-[76px]' : 'w-60',
       )}
     >
       {/* Logo */}
-      <div className={cn(
-        'flex items-center border-b border-slate-700/50 transition-all duration-300',
-        collapsed ? 'justify-center px-4 py-5' : 'gap-3 px-5 py-5'
-      )}>
-        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-glow-sm">
-          <TrendingUp className="w-4 h-4 text-white" />
-        </div>
+      <div className={cn('flex items-center h-16 border-b border-border', collapsed ? 'justify-center px-4' : 'gap-3 px-5')}>
+        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-serif text-lg leading-none">₣</div>
         {!collapsed && (
-          <AnimatedGradientText
-            className="font-semibold text-sm tracking-tight truncate"
-            colorFrom="#a5b4fc"
-            colorTo="#e879f9"
-            speed={0.6}
-          >
-            Finance Tracker
-          </AnimatedGradientText>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold tracking-tight text-foreground leading-tight">Finanzas</p>
+            <p className="text-[11px] text-muted-foreground leading-tight">datos en vivo</p>
+          </div>
         )}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
         {NAV_ITEMS.map(item => {
           const active = pathname.startsWith(item.href)
           const Icon = item.icon
+          const showBadge = item.badge && pendientes && pendientes > 0
           return (
             <Link
               key={item.href}
               href={item.href}
               title={collapsed ? item.label : undefined}
               className={cn(
-                'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
-                collapsed ? 'justify-center' : '',
+                'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors',
+                collapsed && 'justify-center',
                 active
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25'
-                  : 'text-slate-400 hover:bg-slate-700/60 hover:text-white'
+                  ? 'bg-secondary text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
               )}
             >
-              {/* Glow effect on hover */}
-              {!active && (
-                <span
-                  className={cn(
-                    'absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300',
-                    `bg-gradient-to-r ${item.gradient} opacity-0 group-hover:opacity-10`
-                  )}
-                />
-              )}
-              <Icon
-                className={cn(
-                  'flex-shrink-0 w-[18px] h-[18px] transition-colors',
-                  active ? 'text-white' : 'text-slate-400 group-hover:text-white'
-                )}
-              />
-              {!collapsed && (
-                <>
-                  <span className="truncate">{item.label}</span>
-                  {active && (
-                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/80" />
-                  )}
-                </>
+              <Icon className="flex-shrink-0 w-[18px] h-[18px]" strokeWidth={active ? 2.2 : 1.8} />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+              {showBadge && (
+                <span className={cn(
+                  'ml-auto text-[11px] font-bold rounded-full bg-destructive/12 text-destructive tabular',
+                  collapsed
+                    ? 'absolute -top-0.5 -right-0.5 w-4 h-4 grid place-items-center'
+                    : 'px-2 py-0.5',
+                )}>
+                  {pendientes}
+                </span>
               )}
             </Link>
           )
         })}
       </nav>
 
+      {/* Registrar gasto → abre el asistente */}
+      <div className="px-3 pb-2">
+        <button
+          onClick={() => window.dispatchEvent(new Event('open-chat'))}
+          title="Registrar gasto"
+          className={cn(
+            'w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground font-medium text-[13.5px] py-2.5 transition-opacity hover:opacity-90',
+          )}
+        >
+          <Plus className="w-4 h-4" strokeWidth={2.4} />
+          {!collapsed && <span>Registrar gasto</span>}
+        </button>
+      </div>
+
       {/* Footer */}
-      <div className={cn(
-        'px-3 py-4 border-t border-slate-700/50 space-y-2',
-      )}>
-        {/* Dark mode toggle */}
+      <div className="px-3 py-3 border-t border-border space-y-1">
         {mounted && (
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className={cn(
-              'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200',
-              'text-slate-400 hover:bg-slate-700/60 hover:text-white',
-              collapsed ? 'justify-center' : ''
+              'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] font-medium transition-colors',
+              'text-muted-foreground hover:bg-muted hover:text-foreground',
+              collapsed && 'justify-center',
             )}
             title={theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
           >
-            {theme === 'dark' ? (
-              <Sun className="flex-shrink-0 w-[18px] h-[18px]" />
-            ) : (
-              <Moon className="flex-shrink-0 w-[18px] h-[18px]" />
-            )}
+            {theme === 'dark' ? <Sun className="w-[18px] h-[18px]" /> : <Moon className="w-[18px] h-[18px]" />}
             {!collapsed && <span>Modo {theme === 'dark' ? 'claro' : 'oscuro'}</span>}
           </button>
         )}
-
-        {/* Collapse toggle */}
         <div className={cn(collapsed ? 'flex justify-center' : 'flex items-center justify-between')}>
-          {!collapsed && (
-            <p className="text-xs text-slate-600 px-2">Datos en tiempo real</p>
-          )}
+          {!collapsed && <p className="text-[11px] text-muted-foreground px-2">Datos en tiempo real</p>}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="flex-shrink-0 p-1.5 rounded-lg hover:bg-slate-700/60 text-slate-500 hover:text-slate-300 transition-colors"
+            className="flex-shrink-0 p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title={collapsed ? 'Expandir' : 'Colapsar'}
           >
-            <ChevronLeft
-              className={cn('w-4 h-4 transition-transform duration-300', collapsed && 'rotate-180')}
-            />
+            <ChevronLeft className={cn('w-4 h-4 transition-transform duration-300', collapsed && 'rotate-180')} />
           </button>
         </div>
       </div>

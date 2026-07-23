@@ -69,6 +69,13 @@ export default function ChatPanel() {
     }
   }, [open])
 
+  // Abrir desde el botón "Registrar gasto" (sidebar) o el FAB (mobile)
+  useEffect(() => {
+    const handler = () => setOpen(true)
+    window.addEventListener('open-chat', handler)
+    return () => window.removeEventListener('open-chat', handler)
+  }, [])
+
   const sendMessage = useCallback(async () => {
     const text = input.trim()
     if (!text || loading) return
@@ -129,27 +136,27 @@ export default function ChatPanel() {
     <>
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-[calc(var(--sab)_+_5.5rem)] md:bottom-24 right-2 left-2 md:left-auto md:right-6 z-50 md:w-[380px] max-h-[80vh] md:max-h-none md:h-[520px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed bottom-[calc(var(--sab)_+_5.5rem)] md:bottom-24 right-2 left-2 md:left-auto md:right-6 z-50 md:w-[380px] max-h-[80vh] md:max-h-none md:h-[520px] bg-card rounded-2xl shadow-modal border border-border flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-gray-900 text-white">
+          <div className="flex items-center justify-between px-4 py-3 bg-primary text-primary-foreground">
             <div className="flex items-center gap-2">
               <span className="text-lg">💰</span>
               <div>
                 <p className="text-sm font-semibold leading-tight">Asistente financiero</p>
-                <p className="text-xs text-gray-400 leading-tight">Consultá o cargá gastos</p>
+                <p className="text-xs text-primary-foreground/70 leading-tight">Consultá o cargá gastos</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={clearHistory}
-                className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded transition-colors"
+                className="text-xs text-primary-foreground/70 hover:text-primary-foreground px-2 py-1 rounded transition-colors"
                 title="Limpiar historial"
               >
                 limpiar
               </button>
               <button
                 onClick={() => setOpen(false)}
-                className="text-gray-400 hover:text-white transition-colors p-1"
+                className="text-primary-foreground/70 hover:text-primary-foreground transition-colors p-1"
               >
                 ✕
               </button>
@@ -157,11 +164,11 @@ export default function ChatPanel() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-muted/40">
             {messages.length === 0 && (
               <div className="text-center py-6">
                 <p className="text-2xl mb-2">👋</p>
-                <p className="text-sm font-medium text-gray-700">¿En qué te ayudo?</p>
+                <p className="text-sm font-medium text-foreground">¿En qué te ayudo?</p>
                 <div className="mt-4 space-y-2 text-left">
                   {[
                     '¿Cuánto gasté este mes?',
@@ -172,7 +179,7 @@ export default function ChatPanel() {
                     <button
                       key={suggestion}
                       onClick={() => { setInput(suggestion); inputRef.current?.focus() }}
-                      className="block w-full text-left text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 text-gray-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-colors"
+                      className="block w-full text-left text-xs bg-card border border-border rounded-lg px-3 py-2 text-muted-foreground hover:bg-secondary hover:border-primary/30 hover:text-primary transition-colors"
                     >
                       {suggestion}
                     </button>
@@ -189,8 +196,8 @@ export default function ChatPanel() {
                 <div
                   className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-emerald-600 text-white rounded-br-sm'
-                      : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
+                      ? 'bg-primary text-primary-foreground rounded-br-sm'
+                      : 'bg-card text-foreground border border-border rounded-bl-sm shadow-card'
                   }`}
                 >
                   {msg.role === 'assistant' ? renderMessage(msg.content) : msg.content}
@@ -200,11 +207,11 @@ export default function ChatPanel() {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm">
+                <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-4 py-3 shadow-card">
                   <div className="flex gap-1 items-center">
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce [animation-delay:0ms]" />
+                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce [animation-delay:150ms]" />
+                    <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-bounce [animation-delay:300ms]" />
                   </div>
                 </div>
               </div>
@@ -214,7 +221,7 @@ export default function ChatPanel() {
           </div>
 
           {/* Input */}
-          <div className="border-t border-gray-200 bg-white px-3 py-3">
+          <div className="border-t border-border bg-card px-3 py-3">
             <div className="flex items-end gap-2">
               <textarea
                 ref={inputRef}
@@ -223,7 +230,7 @@ export default function ChatPanel() {
                 onKeyDown={handleKeyDown}
                 placeholder="Escribí tu consulta... (Enter para enviar)"
                 rows={1}
-                className="flex-1 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent max-h-28 overflow-y-auto"
+                className="flex-1 resize-none border border-input bg-background text-foreground rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent max-h-28 overflow-y-auto"
                 style={{ minHeight: '40px' }}
                 onInput={e => {
                   const el = e.currentTarget
@@ -235,14 +242,14 @@ export default function ChatPanel() {
               <button
                 onClick={sendMessage}
                 disabled={!input.trim() || loading}
-                className="flex-shrink-0 w-10 h-10 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:cursor-not-allowed text-white rounded-xl flex items-center justify-center transition-colors"
+                className="flex-shrink-0 w-10 h-10 bg-primary hover:opacity-90 disabled:bg-muted disabled:cursor-not-allowed disabled:opacity-100 text-primary-foreground rounded-xl flex items-center justify-center transition-opacity"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 rotate-90">
                   <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
                 </svg>
               </button>
             </div>
-            <p className="text-[10px] text-gray-400 mt-1.5 text-center">
+            <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
               Shift+Enter para nueva línea · Powered by Gemini
             </p>
           </div>
@@ -252,10 +259,10 @@ export default function ChatPanel() {
       {/* Botón flotante */}
       <button
         onClick={() => setOpen(prev => !prev)}
-        className={`fixed bottom-[calc(var(--sab)_+_5rem)] md:bottom-6 right-4 md:right-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all ${
+        className={`fixed bottom-[calc(var(--sab)_+_5rem)] md:bottom-6 right-4 md:right-6 z-50 w-14 h-14 rounded-full shadow-card-hover flex items-center justify-center transition-all ${
           open
-            ? 'bg-gray-800 hover:bg-gray-700 text-white rotate-0'
-            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+            ? 'bg-foreground hover:opacity-90 text-background rotate-0'
+            : 'bg-primary hover:opacity-90 text-primary-foreground'
         }`}
         title={open ? 'Cerrar chat' : 'Abrir asistente'}
       >

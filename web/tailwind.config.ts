@@ -57,12 +57,14 @@ const config: Config = {
         '3xl': 'calc(var(--radius) + 14px)',
       },
       fontFamily: {
-        sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans:  ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'Iowan Old Style', 'Georgia', 'serif'],
       },
       boxShadow: {
-        'card':    '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)',
-        'card-hover': '0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06)',
-        'modal':   '0 20px 40px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.06)',
+        // Calmo: elevación mínima, un solo nivel sutil (borde > sombra)
+        'card':       '0 1px 2px rgba(24,24,34,0.04)',
+        'card-hover': '0 4px 14px -6px rgba(24,24,34,0.12)',
+        'modal':      '0 24px 48px -12px rgba(24,24,34,0.20)',
         'glow-primary': '0 0 20px rgba(99,102,241,0.35)',
         'glow-sm':      '0 0 8px rgba(99,102,241,0.25)',
       },

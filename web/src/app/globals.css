@@ -4,90 +4,86 @@
 
 /* ─── Design Tokens ──────────────────────────────────────────── */
 @layer base {
+  /* ── Dirección "Calmo": neutro con sesgo índigo, un solo acento,
+        semántica de color reservada (verde/rojo/ámbar = significado). ── */
   :root {
-    /* Backgrounds */
-    --background:         0 0% 98%;
-    --foreground:         240 10% 4%;
+    /* Backgrounds — neutro frío elegido, no gris puro */
+    --background:         240 14% 96%;
+    --foreground:         240 15% 12%;
 
     /* Card / Surface */
     --card:               0 0% 100%;
-    --card-foreground:    240 10% 4%;
+    --card-foreground:    240 15% 12%;
 
     /* Popover */
     --popover:            0 0% 100%;
-    --popover-foreground: 240 10% 4%;
+    --popover-foreground: 240 15% 12%;
 
-    /* Primary — Indigo */
-    --primary:            239 84% 67%;
+    /* Primary — Índigo (único acento interactivo) */
+    --primary:            245 75% 59%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary — Indigo tinted surface */
-    --secondary:          239 84% 97%;
-    --secondary-foreground: 239 84% 40%;
+    /* Secondary — superficie índigo tenue */
+    --secondary:          248 60% 96%;
+    --secondary-foreground: 245 55% 45%;
 
-    /* Muted — Zinc */
-    --muted:              240 5% 96%;
-    --muted-foreground:   240 4% 46%;
+    /* Muted */
+    --muted:              240 12% 94%;
+    --muted-foreground:   240 6% 46%;
 
-    /* Accent — Violet */
-    --accent:             262 83% 58%;
+    /* Accent = mismo índigo (evita un violeta compitiendo) */
+    --accent:             245 75% 59%;
     --accent-foreground:  0 0% 100%;
 
-    /* Destructive — Rose */
-    --destructive:        347 77% 50%;
+    /* Semántica financiera */
+    --destructive:        347 74% 42%;   /* rojo: gasto sube / vencido */
     --destructive-foreground: 0 0% 100%;
-
-    /* Success — Emerald */
-    --success:            160 84% 39%;
+    --success:            142 55% 32%;    /* verde: pagado / baja */
     --success-foreground: 0 0% 100%;
-
-    /* Warning — Amber */
-    --warning:            38 92% 50%;
+    --warning:            32 82% 38%;     /* ámbar: próximo a vencer */
     --warning-foreground: 0 0% 100%;
 
     /* Border / Input / Ring */
-    --border:             240 6% 90%;
-    --input:              240 6% 90%;
-    --ring:               239 84% 67%;
+    --border:             240 10% 91%;
+    --input:              240 10% 91%;
+    --ring:               245 75% 59%;
 
     /* Radius base */
-    --radius:             0.625rem;
+    --radius:             0.875rem;
   }
 
   .dark {
-    --background:         240 10% 4%;
-    --foreground:         0 0% 98%;
+    --background:         240 16% 6%;
+    --foreground:         240 12% 96%;
 
-    --card:               240 10% 7%;
-    --card-foreground:    0 0% 98%;
+    --card:               240 13% 10%;
+    --card-foreground:    240 12% 96%;
 
-    --popover:            240 10% 7%;
-    --popover-foreground: 0 0% 98%;
+    --popover:            240 13% 10%;
+    --popover-foreground: 240 12% 96%;
 
-    --primary:            239 100% 72%;
-    --primary-foreground: 240 10% 4%;
+    --primary:            246 100% 76%;
+    --primary-foreground: 240 16% 8%;
 
-    --secondary:          240 4% 14%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary:          246 28% 18%;
+    --secondary-foreground: 245 60% 86%;
 
-    --muted:              240 4% 14%;
-    --muted-foreground:   240 5% 60%;
+    --muted:              240 13% 14%;
+    --muted-foreground:   240 6% 60%;
 
-    --accent:             262 83% 68%;
-    --accent-foreground:  0 0% 100%;
+    --accent:             246 100% 76%;
+    --accent-foreground:  240 16% 8%;
 
-    --destructive:        347 77% 62%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive:        350 85% 69%;
+    --destructive-foreground: 240 16% 8%;
+    --success:            146 58% 55%;
+    --success-foreground: 240 16% 8%;
+    --warning:            35 80% 60%;
+    --warning-foreground: 240 16% 8%;
 
-    --success:            160 60% 50%;
-    --success-foreground: 0 0% 100%;
-
-    --warning:            38 95% 60%;
-    --warning-foreground: 0 0% 100%;
-
-    --border:             240 4% 16%;
-    --input:              240 4% 16%;
-    --ring:               239 100% 72%;
+    --border:             240 11% 17%;
+    --input:              240 11% 17%;
+    --ring:               246 100% 76%;
   }
 }
 
@@ -98,7 +94,7 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground antialiased font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
@@ -121,26 +117,22 @@
   .pb-safe    { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .pb-safe-24 { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6rem); }
 
-  /* Glassmorphism */
+  /* Superficies translúcidas (nav mobile) — sobre tokens, neutras */
   .glass {
-    @apply bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-white/20 dark:border-white/10;
+    @apply bg-card/80 backdrop-blur-xl border border-border;
   }
   .glass-nav {
-    @apply bg-white/90 dark:bg-black/80 backdrop-blur-2xl border border-zinc-200/80 dark:border-zinc-800/80;
+    @apply bg-card/90 backdrop-blur-2xl border border-border;
   }
 
-  /* Gradient text */
-  .gradient-text {
-    @apply bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 bg-clip-text text-transparent;
-  }
+  /* Calmo: sin gradientes decorativos — se resuelven al acento sólido.
+     Se mantienen las clases para no romper componentes existentes. */
+  .gradient-text    { @apply text-primary; }
+  .gradient-primary { @apply bg-primary; }
+  .gradient-active  { @apply bg-primary; }
 
-  /* Gradient backgrounds */
-  .gradient-primary {
-    @apply bg-gradient-to-r from-indigo-600 to-violet-600;
-  }
-  .gradient-active {
-    @apply bg-gradient-to-r from-blue-600 to-purple-600;
-  }
+  /* Serif editorial para números héroe / titulares */
+  .font-display { font-family: var(--font-serif), 'Iowan Old Style', Georgia, serif; }
 
   /* Tabular nums para montos */
   .tabular { font-variant-numeric: tabular-nums; }

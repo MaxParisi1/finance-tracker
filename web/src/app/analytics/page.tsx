@@ -222,7 +222,7 @@ export default async function AnalyticsPage() {
                         <td className="py-3 font-medium text-foreground">{t.label}</td>
                         <td className="py-3 text-right text-foreground tabular">{formatARS(t.total_ars)}</td>
                         {tcBlue && (
-                          <td className="py-3 text-right text-blue-500 text-xs tabular">
+                          <td className="py-3 text-right text-primary text-xs tabular">
                             {usdEquiv ? `USD ${usdEquiv.toLocaleString('es-AR')}` : '—'}
                           </td>
                         )}

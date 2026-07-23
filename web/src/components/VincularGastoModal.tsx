@@ -56,7 +56,7 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
-            <Link2 className="w-4 h-4 text-indigo-500" />
+            <Link2 className="w-4 h-4 text-primary" />
             <h2 className="font-semibold text-foreground text-sm">Vincular a un gasto</h2>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -95,7 +95,7 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
                     className={cn(
                       'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors',
                       selected === g.id
-                        ? 'bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30'
+                        ? 'bg-secondary border border-primary/30'
                         : 'hover:bg-muted/50',
                     )}
                   >
@@ -112,7 +112,7 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
                         {formatARS(g.monto_ars ?? 0)}
                       </span>
                       {selected === g.id && (
-                        <Check className="w-4 h-4 text-indigo-500" />
+                        <Check className="w-4 h-4 text-primary" />
                       )}
                     </div>
                   </button>
@@ -131,7 +131,7 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
             size="sm"
             onClick={handleConfirm}
             disabled={!selected || isPending || done}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            className="bg-primary hover:opacity-90 text-primary-foreground"
           >
             {done ? <Check className="w-4 h-4" /> : isPending ? 'Vinculando…' : 'Vincular'}
           </Button>

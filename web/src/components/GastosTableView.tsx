@@ -155,7 +155,7 @@ export default function GastosTableView({ gastos, categorias, comercios: comerci
           )}
         </span>
         {totalUSD > 0 && (
-          <span className="text-blue-500 font-medium">
+          <span className="text-primary font-medium">
             · USD {totalUSD.toFixed(2)}
           </span>
         )}

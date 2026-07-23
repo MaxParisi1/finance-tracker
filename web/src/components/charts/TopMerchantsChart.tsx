@@ -53,7 +53,7 @@ export default function TopMerchantsChart({ data }: Props) {
         <XAxis
           type="number"
           tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
         />
@@ -61,12 +61,12 @@ export default function TopMerchantsChart({ data }: Props) {
           type="category"
           dataKey="label"
           width={150}
-          tick={{ fontSize: 11, fill: '#374151' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--foreground))' }}
           tickLine={false}
           axisLine={false}
         />
         <Tooltip content={<CustomTooltip />} />
-        <Bar dataKey="total_ars" fill="#6366f1" radius={[0, 4, 4, 0]} />
+        <Bar dataKey="total_ars" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>
   )

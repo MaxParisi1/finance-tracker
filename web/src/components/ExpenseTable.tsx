@@ -70,7 +70,7 @@ export default function ExpenseTable({ gastos, compact = false, onRowClick, arch
                     </span>
                   )}
                   {g.moneda === 'USD' && (
-                    <span className="text-xs bg-blue-500/10 text-blue-500 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-medium">
+                    <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full font-medium">
                       USD
                     </span>
                   )}

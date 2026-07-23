@@ -13,7 +13,8 @@ interface Props {
   data: PaymentData[]
 }
 
-const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#6b7280']
+// Paleta categórica Calmo (identidad fija, siempre con leyenda)
+const COLORS = ['#4f46e5', '#0d9488', '#d97706', '#db2777', '#7c3aed', '#64748b']
 
 function CustomTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null
@@ -60,7 +61,7 @@ export default function PaymentMethodChart({ data }: Props) {
           formatter={(_, entry: any) =>
             MEDIO_PAGO_LABELS[entry.payload.medio_pago] ?? entry.payload.medio_pago
           }
-          wrapperStyle={{ fontSize: 11, color: '#6b7280' }}
+          wrapperStyle={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }}
           iconSize={10}
           iconType="circle"
         />

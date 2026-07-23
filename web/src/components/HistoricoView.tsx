@@ -83,7 +83,7 @@ export default function HistoricoView({ meses, gastos, categorias, filtros }: Pr
               className={cn(
                 'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
                 filtros.rango === r.value
-                  ? 'bg-indigo-600 text-white shadow-sm'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted',
               )}
             >

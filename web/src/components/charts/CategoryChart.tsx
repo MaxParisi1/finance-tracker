@@ -52,7 +52,7 @@ export default function CategoryChart({ data }: Props) {
         <XAxis
           type="number"
           tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
         />
@@ -60,14 +60,14 @@ export default function CategoryChart({ data }: Props) {
           type="category"
           dataKey="categoria"
           width={140}
-          tick={{ fontSize: 12, fill: '#374151' }}
+          tick={{ fontSize: 12, fill: 'hsl(var(--foreground))' }}
           tickLine={false}
           axisLine={false}
         />
         <Tooltip content={<CustomTooltip />} />
         <Bar dataKey="total_ars" radius={[0, 4, 4, 0]}>
           {sorted.map((entry, i) => (
-            <Cell key={i} fill={entry.color ?? '#10b981'} />
+            <Cell key={i} fill={entry.color ?? '#4f46e5'} />
           ))}
         </Bar>
       </BarChart>

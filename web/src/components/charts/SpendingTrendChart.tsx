@@ -27,7 +27,7 @@ function CustomTooltip({ active, payload, label }: any) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm text-sm">
       <p className="font-medium text-gray-900">{d.label}</p>
-      <p className="text-emerald-600 font-semibold mt-1">
+      <p className="text-primary font-semibold mt-1">
         {new Intl.NumberFormat('es-AR', {
           style: 'currency',
           currency: 'ARS',
@@ -36,7 +36,7 @@ function CustomTooltip({ active, payload, label }: any) {
       </p>
       <p className="text-gray-400 text-xs">{d.cantidad} gastos</p>
       {d.variacion_pct !== null && (
-        <p className={`text-xs mt-1 ${d.variacion_pct > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+        <p className={`text-xs mt-1 ${d.variacion_pct > 0 ? 'text-destructive' : 'text-success'}`}>
           {d.variacion_pct > 0 ? '+' : ''}{d.variacion_pct}% vs mes anterior
         </p>
       )}
@@ -48,16 +48,16 @@ export default function SpendingTrendChart({ data }: Props) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
         <XAxis
           dataKey="label"
-          tick={{ fontSize: 12, fill: '#6b7280' }}
+          tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
         />
         <YAxis
           tickFormatter={formatK}
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
           width={55}
@@ -66,9 +66,9 @@ export default function SpendingTrendChart({ data }: Props) {
         <Line
           type="monotone"
           dataKey="total_ars"
-          stroke="#10b981"
+          stroke="hsl(var(--primary))"
           strokeWidth={2.5}
-          dot={{ r: 4, fill: '#10b981', strokeWidth: 0 }}
+          dot={{ r: 4, fill: 'hsl(var(--primary))', strokeWidth: 0 }}
           activeDot={{ r: 6 }}
         />
       </LineChart>

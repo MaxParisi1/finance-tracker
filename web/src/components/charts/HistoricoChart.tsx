@@ -30,7 +30,7 @@ function CustomTooltip({ active, payload }: any) {
   return (
     <div className="bg-popover border border-border rounded-lg px-4 py-3 shadow-md text-sm">
       <p className="font-semibold text-foreground">{d.label}</p>
-      <p className="text-indigo-500 font-bold mt-1">{formatARS(d.total_ars)}</p>
+      <p className="text-primary font-bold mt-1">{formatARS(d.total_ars)}</p>
       <p className="text-muted-foreground text-xs mt-0.5">{d.cantidad} gasto{d.cantidad !== 1 ? 's' : ''}</p>
     </div>
   )
@@ -45,13 +45,13 @@ export default function HistoricoChart({ data, mesActual }: Props) {
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
         <XAxis
           dataKey="label"
-          tick={{ fontSize: 11, fill: '#94a3b8' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
         />
         <YAxis
           tickFormatter={formatK}
-          tick={{ fontSize: 10, fill: '#94a3b8' }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
           width={52}
@@ -64,7 +64,7 @@ export default function HistoricoChart({ data, mesActual }: Props) {
             return (
               <Cell
                 key={`${d.anio}-${d.mes}`}
-                fill={isActive ? '#818cf8' : '#6366f1'}
+                fill={isActive ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.5)'}
                 opacity={isActive ? 1 : 0.65}
               />
             )

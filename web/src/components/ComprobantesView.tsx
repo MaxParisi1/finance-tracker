@@ -204,7 +204,7 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
                       ) : (
                         <button
                           onClick={() => setVinculando(a)}
-                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-indigo-500 transition-colors"
+                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
                           title="Vincular a un gasto"
                         >
                           <Link2 className="w-3.5 h-3.5" />
@@ -231,7 +231,7 @@ export default function ComprobantesView({ archivos, categorias, gastos }: Props
                       <button
                         onClick={() => handleEliminar(a.id)}
                         disabled={eliminando === a.id}
-                        className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-40"
+                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
                         title="Eliminar comprobante"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

@@ -44,7 +44,7 @@ function CustomTooltip({ active, payload, label }: any) {
           </span>
         </p>
       )}
-      <p className="text-emerald-600">
+      <p className="text-primary">
         Acumulado:{' '}
         <span className="font-semibold">
           {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(acum?.value ?? 0)}
@@ -58,10 +58,10 @@ export default function DailySpendingChart({ data }: Props) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <ComposedChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
         <XAxis
           dataKey="dia"
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
           interval={4}
@@ -69,7 +69,7 @@ export default function DailySpendingChart({ data }: Props) {
         <YAxis
           yAxisId="left"
           tickFormatter={formatK}
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
           width={55}
@@ -78,7 +78,7 @@ export default function DailySpendingChart({ data }: Props) {
           yAxisId="right"
           orientation="right"
           tickFormatter={formatK}
-          tick={{ fontSize: 11, fill: '#6b7280' }}
+          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={false}
           width={60}
@@ -86,14 +86,14 @@ export default function DailySpendingChart({ data }: Props) {
         <Tooltip content={<CustomTooltip />} />
         <Legend
           formatter={(value) => value === 'total_ars' ? 'Gasto diario' : 'Acumulado'}
-          wrapperStyle={{ fontSize: 12, color: '#6b7280' }}
+          wrapperStyle={{ fontSize: 12, color: 'hsl(var(--muted-foreground))' }}
         />
-        <Bar yAxisId="left" dataKey="total_ars" fill="#d1fae5" radius={[3, 3, 0, 0]} maxBarSize={20} />
+        <Bar yAxisId="left" dataKey="total_ars" fill="hsl(var(--primary) / 0.20)" radius={[3, 3, 0, 0]} maxBarSize={20} />
         <Line
           yAxisId="right"
           type="monotone"
           dataKey="acumulado"
-          stroke="#10b981"
+          stroke="hsl(var(--primary))"
           strokeWidth={2}
           dot={false}
         />

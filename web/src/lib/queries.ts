@@ -495,6 +495,123 @@ export async function getRecurrentesConCosto(): Promise<{
 }
 
 // ──────────────────────────────────────────────
+// Fijos del mes (estado de pagos: pagado vs pendiente)
+// ──────────────────────────────────────────────
+
+export interface FijoDelMes {
+  id: string
+  descripcion: string
+  categoria: string
+  medio_pago: string
+  moneda: string
+  monto_original: number
+  monto_ars: number
+  frecuencia: string
+  proximo_vencimiento: string
+  pagado: boolean
+  fecha_pago?: string
+  con_comprobante: boolean
+  dias_para_vencimiento: number
+}
+
+export interface FijosDelMes {
+  pendientes: FijoDelMes[]
+  pagados: FijoDelMes[]
+  count_total: number
+  count_pagados: number
+  total_pendiente_ars: number
+  total_pagado_ars: number
+  total_mes_ars: number
+  proximo_dias: number | null
+  pct_pagado: number
+}
+
+/**
+ * Estado de los fijos (recurrentes) en un mes: cuáles ya pagaste y cuáles faltan.
+ * "Pagado este mes" = existe un gasto vinculado (recurrente_id) con fecha en el mes.
+ */
+export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDelMes> {
+  const supabase = getSupabaseServer()
+  const { desde, hasta } = monthRange(mes, anio)
+
+  const [recurrentes, tcInfo] = await Promise.all([getRecurrentes(), getTipoCambioActual('oficial')])
+  const tc = tcInfo?.valor ?? 1
+
+  // Pagos del mes vinculados a un recurrente (el más reciente por recurrente)
+  const ids = recurrentes.map(r => r.id)
+  const pagoPorRec = new Map<string, { fecha: string; gasto_id: string }>()
+  const gastoIds: string[] = []
+  if (ids.length > 0) {
+    const { data: pagos } = await supabase
+      .from('gastos')
+      .select('id, recurrente_id, fecha')
+      .in('recurrente_id', ids)
+      .gte('fecha', desde)
+      .lt('fecha', hasta)
+      .is('deleted_at', null)
+      .order('fecha', { ascending: false })
+    for (const g of pagos ?? []) {
+      if (g.recurrente_id && !pagoPorRec.has(g.recurrente_id)) {
+        pagoPorRec.set(g.recurrente_id, { fecha: g.fecha, gasto_id: g.id })
+        gastoIds.push(g.id)
+      }
+    }
+  }
+  const comprobantes = await contarArchivosPorGastos(gastoIds)
+
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const toARS = (m: number, mon: string) => (mon === 'USD' ? Math.round(m * tc) : m)
+
+  const build = (r: GastoRecurrente): FijoDelMes => {
+    const pago = pagoPorRec.get(r.id)
+    const venc = new Date(r.proximo_vencimiento + 'T00:00:00')
+    const dias = Math.round((venc.getTime() - hoy.getTime()) / 86400000)
+    return {
+      id: r.id,
+      descripcion: r.descripcion,
+      categoria: r.categoria,
+      medio_pago: r.medio_pago,
+      moneda: r.moneda,
+      monto_original: r.monto_original,
+      monto_ars: toARS(r.monto_original, r.moneda),
+      frecuencia: r.frecuencia,
+      proximo_vencimiento: r.proximo_vencimiento,
+      pagado: !!pago,
+      fecha_pago: pago?.fecha,
+      con_comprobante: pago ? (comprobantes[pago.gasto_id] ?? 0) > 0 : false,
+      dias_para_vencimiento: dias,
+    }
+  }
+
+  const pagados: FijoDelMes[] = []
+  const pendientes: FijoDelMes[] = []
+  for (const r of recurrentes) {
+    const f = build(r)
+    if (f.pagado) pagados.push(f)
+    else if (r.proximo_vencimiento < hasta) pendientes.push(f) // vence este mes o está vencido
+  }
+  pendientes.sort((a, b) => a.proximo_vencimiento.localeCompare(b.proximo_vencimiento))
+  pagados.sort((a, b) => (b.fecha_pago ?? '').localeCompare(a.fecha_pago ?? ''))
+
+  const total_pendiente_ars = pendientes.reduce((s, f) => s + f.monto_ars, 0)
+  const total_pagado_ars = pagados.reduce((s, f) => s + f.monto_ars, 0)
+  const count_total = pendientes.length + pagados.length
+
+  return {
+    pendientes,
+    pagados,
+    count_total,
+    count_pagados: pagados.length,
+    total_pendiente_ars,
+    total_pagado_ars,
+    total_mes_ars: total_pendiente_ars + total_pagado_ars,
+    proximo_dias: pendientes.length ? pendientes[0].dias_para_vencimiento : null,
+    pct_pagado: count_total ? Math.round((pagados.length / count_total) * 100) : 0,
+  }
+}
+
+// ──────────────────────────────────────────────
 // Archivos Drive (comprobantes/facturas)
 // ──────────────────────────────────────────────
 

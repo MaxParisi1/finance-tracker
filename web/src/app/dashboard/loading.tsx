@@ -12,15 +12,18 @@ export default function DashboardLoading() {
             <Skeleton className="h-8 w-48" />
             <Skeleton className="h-4 w-64" />
           </div>
-          {/* KPI cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border p-4 space-y-3">
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-7 w-32" />
-                <Skeleton className="h-3 w-16" />
+          {/* Hero + categorías */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+            <div className="lg:col-span-3 rounded-xl border border-border p-6 flex items-center gap-6">
+              <Skeleton className="h-[108px] w-[108px] rounded-full" />
+              <div className="space-y-3 flex-1">
+                <Skeleton className="h-10 w-48" />
+                <Skeleton className="h-4 w-56" />
               </div>
-            ))}
+            </div>
+            <div className="lg:col-span-2 rounded-xl border border-border p-6 space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
+            </div>
           </div>
           {/* Table skeleton */}
           <div className="rounded-xl border border-border p-6 space-y-4">

@@ -8,20 +8,19 @@ export default function LoginPage({
 }) {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      {/* Gradient blobs */}
+      {/* Halo sutil de acento */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-gradient-to-br from-indigo-500/20 to-violet-500/20 blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-tr from-violet-500/15 to-purple-500/15 blur-3xl" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/3 w-[38rem] h-[38rem] rounded-full bg-primary/8 blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-sm">
         <div className="bg-card text-card-foreground rounded-2xl shadow-modal border border-border p-8">
           {/* Logo */}
           <div className="text-center mb-8">
-            <div className="inline-flex w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 items-center justify-center mb-4 shadow-glow-sm">
-              <TrendingUp className="w-6 h-6 text-white" />
+            <div className="inline-flex w-12 h-12 rounded-xl bg-primary items-center justify-center mb-4">
+              <TrendingUp className="w-6 h-6 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-semibold text-foreground">Finance Tracker</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">Finance Tracker</h1>
             <p className="text-sm text-muted-foreground mt-1">Ingresá tu contraseña para continuar</p>
           </div>
 
@@ -42,7 +41,7 @@ export default function LoginPage({
 
             <button
               type="submit"
-              className="w-full h-10 gradient-primary text-white font-medium rounded-lg text-sm transition-opacity hover:opacity-90 shadow-glow-sm"
+              className="w-full h-10 bg-primary text-primary-foreground font-medium rounded-lg text-sm transition-opacity hover:opacity-90"
             >
               Entrar
             </button>

@@ -41,7 +41,7 @@ export default async function GastosPage({
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Gastos</h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Gastos</h1>
               <p className="text-muted-foreground text-sm mt-1">
                 {isSearching
                   ? `Resultados para "${q}" · ${gastos.length} registros · ${formatARS(totalARS)}`

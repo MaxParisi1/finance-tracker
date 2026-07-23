@@ -54,7 +54,7 @@ export default async function AnalyticsPage() {
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-foreground">Analíticas</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Analíticas</h1>
             <p className="text-muted-foreground text-sm mt-1">Últimos 6 meses · actualizado en tiempo real</p>
           </div>
 

@@ -23,7 +23,7 @@ export default async function CuotasPage() {
         <div className="max-w-3xl mx-auto">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-foreground">Planes de cuotas</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Planes de cuotas</h1>
             <p className="text-muted-foreground text-sm mt-1">
               {activos} plan{activos !== 1 ? 'es' : ''} activo{activos !== 1 ? 's' : ''}
               {comprometidoMensual > 0 && (

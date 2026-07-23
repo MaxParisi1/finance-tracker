@@ -28,7 +28,7 @@ export default async function PresupuestosPage({
         <div className="max-w-3xl mx-auto">
           <div className="flex items-start justify-between mb-8">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Presupuestos</h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Presupuestos</h1>
               <p className="text-muted-foreground text-sm mt-1">
                 {monthLabel(mes, anio)} · límites de gasto por categoría
               </p>

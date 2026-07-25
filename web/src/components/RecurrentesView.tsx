@@ -24,7 +24,11 @@ interface Props {
   tc_es_hoy: boolean
   categorias: string[]
   fijos: FijosDelMes
+  mesLabel: string
 }
+
+const fechaCorta = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
+const mesCorto = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { month: 'short' })
 
 function vencInfo(dias: number): { label: string; tone: 'crit' | 'warn' | 'muted' } {
   if (dias < 0) return { label: `vencido hace ${Math.abs(dias)}d`, tone: 'crit' }
@@ -44,7 +48,7 @@ const stripeTone: Record<string, string> = {
 
 export default function RecurrentesView({
   recurrentes, total_mensual_ars, total_anual_ars,
-  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos,
+  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
   const [registrando, setRegistrando] = useState<RecurrenteConCosto | null>(null)
@@ -96,7 +100,7 @@ export default function RecurrentesView({
       {/* Estado de pagos del mes */}
       <Card className="mb-5">
         <CardContent className="p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Estado del mes</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Estado de {mesLabel}</p>
           <div className="flex items-center gap-6 mt-4 flex-wrap">
             <Ring pct={fijos.pct_pagado} pagados={fijos.count_pagados} total={fijos.count_total} />
             <div className="min-w-0">
@@ -189,6 +193,9 @@ export default function RecurrentesView({
                         <span>{r.categoria ?? 'Sin categoría'}</span><span className="opacity-40">·</span>
                         <span>{FRECUENCIA_LABEL[r.frecuencia] ?? r.frecuencia}</span><span className="opacity-40">·</span>
                         <span>Día {r.dia_del_mes}</span>
+                        {pagado && f?.fecha_pago && (
+                          <><span className="opacity-40">·</span><span className="text-success">pagado {fechaCorta(f.fecha_pago)}</span></>
+                        )}
                       </div>
                     </button>
 
@@ -210,8 +217,8 @@ export default function RecurrentesView({
                       )}
                     </div>
 
-                    {/* Acción de pago — disponible siempre que no esté pagado,
-                        incluso en los auto·email por si querés pagarlo a mano. */}
+                    {/* Acción de pago. Si ya está pagado el mes, el botón registra
+                        la PRÓXIMA ocurrencia (adelantar). Disponible también en auto·email. */}
                     {!pagado ? (
                       <button
                         onClick={() => setRegistrando(r)}
@@ -220,7 +227,13 @@ export default function RecurrentesView({
                         Pagar
                       </button>
                     ) : (
-                      <span className="w-[52px] flex-shrink-0" />
+                      <button
+                        onClick={() => setRegistrando(r)}
+                        title={`Adelantar el pago de ${mesCorto(r.proximo_vencimiento)}`}
+                        className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap flex-shrink-0"
+                      >
+                        Pagar {mesCorto(r.proximo_vencimiento)}
+                      </button>
                     )}
                   </div>
                 )

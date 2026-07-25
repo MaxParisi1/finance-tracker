@@ -68,6 +68,9 @@ def _motivo_rechazo(gasto: dict, rec: dict, *, es_alias: bool = False) -> str | 
 
     Los alias aprendidos solo exigen coincidencia de moneda: se confía en el
     aprendizaje previo y se ignoran las variaciones de monto/fecha.
+
+    Los fijos "sin día fija" (dia_del_mes NULL) no tienen vencimiento real, así que
+    se ignora la ventana de fecha y se matchea por moneda + monto + nombre.
     """
     mon_g = (gasto.get('moneda') or 'ARS').upper()
     mon_r = (rec.get('moneda') or 'ARS').upper()
@@ -85,8 +88,10 @@ def _motivo_rechazo(gasto: dict, rec: dict, *, es_alias: bool = False) -> str | 
     except (ValueError, ZeroDivisionError):
         pass
 
+    # Fijos sin día fija: no hay vencimiento con sentido, se omite el filtro de fecha.
+    sin_dia = rec.get('dia_del_mes') is None
     prox = rec.get('proximo_vencimiento')
-    if prox:
+    if prox and not sin_dia:
         try:
             dg = date.fromisoformat(str(gasto.get('fecha') or date.today()))
             dr = date.fromisoformat(str(prox))

@@ -537,21 +537,21 @@ function anclaDia(anio: number, mesIdx0: number, dia: number): Date {
 }
 
 /**
- * A qué mes (YYYY-MM) corresponde un pago mensual: el ancla día-D más cercano a
- * la fecha del pago. Garantiza que cada pago salde exactamente UNA ocurrencia
- * (un pago del 9-jul de un fijo día-1 cuenta para julio, no para julio y agosto).
+ * A qué mes (YYYY-MM) corresponde un pago mensual. Regla: el mes CALENDARIO del
+ * pago — porque `dia_del_mes` suele ser poco confiable (ej: Mapfre figura día 30
+ * pero se cobra a principio de mes). Única excepción: un pago en los últimos días
+ * del mes de un fijo de principio de mes es un adelanto del mes siguiente
+ * (ej: AySA día 1 pagado el 29-jun cuenta para julio). Cada pago cuenta 1 sola vez.
  */
 function mesDelPagoMensual(fecha: string, dia: number): string {
   const [fy, fm, fd] = fecha.split('-').map(Number)
-  const fT = new Date(fy, fm - 1, fd).getTime()
-  let best = ''
-  let bestDiff = Infinity
-  for (const off of [-1, 0, 1]) {
-    const a = anclaDia(fy, fm - 1 + off, dia)
-    const diff = Math.abs(a.getTime() - fT)
-    if (diff < bestDiff) { bestDiff = diff; best = monthKey(a.getFullYear(), a.getMonth() + 1) }
+  const ultimoDia = new Date(fy, fm, 0).getDate()
+  if (dia <= 10 && fd >= ultimoDia - 3) {
+    // Adelanto del mes siguiente
+    const sig = new Date(fy, fm, 1) // primero del mes siguiente
+    return monthKey(sig.getFullYear(), sig.getMonth() + 1)
   }
-  return best
+  return monthKey(fy, fm)
 }
 
 /**

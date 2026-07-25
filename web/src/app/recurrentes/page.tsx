@@ -40,6 +40,8 @@ export default async function RecurrentesPage() {
             categorias={categorias.map(c => c.nombre)}
             fijos={fijos}
             mesLabel={monthLabel(mes, anio)}
+            mes={mes}
+            anio={anio}
           />
         </div>
       </main>

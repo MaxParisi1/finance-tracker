@@ -11,9 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Plus, CheckCircle2, Paperclip, Pencil } from 'lucide-react'
 
-const FRECUENCIA_LABEL: Record<string, string> = {
-  mensual: 'Mensual', anual: 'Anual', semanal: 'Semanal',
-}
+const FRECUENCIA_LABEL: Record<string, string> = { mensual: 'Mensual', anual: 'Anual', semanal: 'Semanal' }
+
+const fechaCorta = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
 
 interface Props {
   recurrentes: RecurrenteConCosto[]
@@ -25,14 +25,13 @@ interface Props {
   categorias: string[]
   fijos: FijosDelMes
   mesLabel: string
+  mes: number
+  anio: number
 }
-
-const fechaCorta = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
-const mesCorto = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { month: 'short' })
 
 function vencInfo(dias: number): { label: string; tone: 'crit' | 'warn' | 'muted' } {
   if (dias < 0) return { label: `vencido hace ${Math.abs(dias)}d`, tone: 'crit' }
-  if (dias === 0) return { label: '¡vence hoy!', tone: 'crit' }
+  if (dias === 0) return { label: 'vence hoy', tone: 'crit' }
   if (dias === 1) return { label: 'vence mañana', tone: 'warn' }
   if (dias <= 5) return { label: `en ${dias} días`, tone: 'warn' }
   return { label: `en ${dias} días`, tone: 'muted' }
@@ -43,12 +42,12 @@ const chipTone: Record<string, string> = {
   muted: 'bg-muted text-muted-foreground',
 }
 const stripeTone: Record<string, string> = {
-  crit: 'bg-destructive', warn: 'bg-warning', muted: 'bg-muted-foreground/30', paid: 'bg-success',
+  crit: 'bg-destructive', warn: 'bg-warning', muted: 'bg-border', paid: 'bg-success/70',
 }
 
 export default function RecurrentesView({
   recurrentes, total_mensual_ars, total_anual_ars,
-  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel,
+  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
   const [registrando, setRegistrando] = useState<RecurrenteConCosto | null>(null)
@@ -56,31 +55,14 @@ export default function RecurrentesView({
   const [isPending, startTransition] = useTransition()
   const [materializeResult, setMaterializeResult] = useState<{ insertados: number; omitidos: number; errores: string[] } | null>(null)
 
-  // Estado de pago del mes por recurrente
-  const estado = new Map<string, FijoDelMes>()
-  for (const f of [...fijos.pendientes, ...fijos.pagados]) estado.set(f.id, f)
-
-  // Orden: pendientes por urgencia → no vencen este mes → pagados
-  const rank = (r: RecurrenteConCosto): number => {
-    const f = estado.get(r.id)
-    if (f?.pagado) return 2
-    if (f) return 0 // pendiente que vence este mes
-    return 1        // no vence este mes
-  }
-  const ordenados = [...recurrentes].sort((a, b) => {
-    const ra = rank(a), rb = rank(b)
-    if (ra !== rb) return ra - rb
-    return a.dias_para_vencimiento - b.dias_para_vencimiento
-  })
+  const recById = new Map(recurrentes.map(r => [r.id, r]))
+  const enMes = new Set([...fijos.pendientes, ...fijos.pagados].map(f => f.id))
+  const otros = recurrentes.filter(r => !enMes.has(r.id))
+  const nextMesCorto = new Date(anio, mes, 1).toLocaleDateString('es-AR', { month: 'short' })
 
   const porCategoria = new Map<string, number>()
-  for (const r of recurrentes) {
-    const cat = r.categoria ?? 'Sin categoría'
-    porCategoria.set(cat, (porCategoria.get(cat) ?? 0) + r.mensual_ars)
-  }
-  const categoriasSorted = Array.from(porCategoria.entries())
-    .map(([cat, total]) => ({ cat, total }))
-    .sort((a, b) => b.total - a.total)
+  for (const r of recurrentes) porCategoria.set(r.categoria ?? 'Sin categoría', (porCategoria.get(r.categoria ?? 'Sin categoría') ?? 0) + r.mensual_ars)
+  const categoriasSorted = Array.from(porCategoria.entries()).map(([cat, total]) => ({ cat, total })).sort((a, b) => b.total - a.total)
 
   function handleMaterialize() {
     setMaterializeResult(null)
@@ -106,41 +88,36 @@ export default function RecurrentesView({
             <div className="min-w-0">
               {fijos.pendientes.length > 0 ? (
                 <>
-                  <div className="font-display text-[2.4rem] leading-none tracking-tight text-foreground tabular">
-                    {formatARS(fijos.total_pendiente_ars)}
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-2 max-w-[36ch]">
+                  <div className="font-display text-[2.6rem] leading-none tracking-tight text-foreground tabular">{formatARS(fijos.total_pendiente_ars)}</div>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-[38ch]">
                     te faltan pagar <b className="text-foreground font-semibold">{fijos.pendientes.length} fijo{fijos.pendientes.length > 1 ? 's' : ''}</b>
                     {proxTexto ? ` · ${proxTexto}` : ''}
                   </p>
                 </>
               ) : (
                 <>
-                  <div className="font-display text-[2.4rem] leading-none tracking-tight text-success">Al día ✓</div>
-                  <p className="text-sm text-muted-foreground mt-2 max-w-[36ch]">
-                    {fijos.count_total > 0 ? `pagaste los ${fijos.count_total} fijos de este mes` : 'no hay fijos que venzan este mes'}
+                  <div className="font-display text-[2.6rem] leading-none tracking-tight text-success">Al día ✓</div>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-[38ch]">
+                    {fijos.count_total > 0 ? `pagaste los ${fijos.count_total} fijos de ${mesLabel.toLowerCase()}` : 'no hay fijos que venzan este mes'}
                   </p>
                 </>
               )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-x-8 gap-y-3 mt-6 pt-5 border-t border-border">
+          <div className="flex flex-wrap gap-x-10 gap-y-3 mt-6 pt-5 border-t border-border">
             <Stat k="Ya pagaste este mes" v={formatARS(fijos.total_pagado_ars)} />
             <Stat k="Compromiso mensual" v={formatARS(total_mensual_ars)} sub={`${recurrentes.length} activos`} />
             <Stat k="Compromiso anual" v={formatARS(total_anual_ars)} />
             {tc_blue && (
-              <Stat
-                k="Equiv. mensual USD"
-                v={`US$ ${Math.round(total_mensual_ars / tc_blue).toLocaleString('es-AR')}`}
-                sub={`TC $${tc_blue.toLocaleString('es-AR')}${tc_fecha ? (tc_es_hoy ? ' · hoy' : ` · ${tc_fecha}`) : ''}`}
-              />
+              <Stat k="Equiv. mensual USD" v={`US$ ${Math.round(total_mensual_ars / tc_blue).toLocaleString('es-AR')}`}
+                sub={`TC $${tc_blue.toLocaleString('es-AR')}${tc_fecha ? (tc_es_hoy ? ' · hoy' : ` · ${tc_fecha}`) : ''}`} />
             )}
           </div>
         </CardContent>
       </Card>
 
       {/* Barra de acciones */}
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           {pendingCount > 0 && (
             <Button onClick={handleMaterialize} disabled={isPending}>
@@ -152,95 +129,56 @@ export default function RecurrentesView({
               <CheckCircle2 className="w-4 h-4 text-success" />
               {materializeResult.insertados} registrados
               {materializeResult.omitidos > 0 && `, ${materializeResult.omitidos} ya existían`}
-              {materializeResult.errores.length > 0 && <span className="text-destructive ml-1">· {materializeResult.errores.length} errores</span>}
             </p>
           )}
         </div>
-        <Button variant="outline" onClick={() => setShowNew(true)}>
-          <Plus className="w-4 h-4 mr-1" /> Nuevo fijo
-        </Button>
+        <Button variant="outline" onClick={() => setShowNew(true)}><Plus className="w-4 h-4 mr-1" /> Nuevo fijo</Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Lista de fijos con estado de pago */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2"><CardTitle className="text-base">Tus fijos</CardTitle></CardHeader>
-          {ordenados.length === 0 ? (
-            <CardContent className="py-12 text-center text-muted-foreground text-sm">No hay fijos activos.</CardContent>
-          ) : (
-            <div className="divide-y divide-border/70">
-              {ordenados.map(r => {
-                const f = estado.get(r.id)
-                const pagado = !!f?.pagado
-                const pendienteDue = !!f && !f.pagado
-                const info = vencInfo(r.dias_para_vencimiento)
-                const stripe = pagado ? 'paid' : pendienteDue ? info.tone : 'muted'
-                const monto = (r.ultimo_moneda ?? r.moneda) === 'USD'
-                  ? `US$ ${(r.ultimo_monto_original ?? r.monto_original).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
-                  : formatARS(r.ultimo_monto_original ?? r.monto_original)
-                return (
-                  <div key={r.id} className={cn('flex items-center gap-3 px-4 py-3.5', pagado && 'opacity-75')}>
-                    <span className={cn('w-[3px] self-stretch rounded-full', stripeTone[stripe])} />
-                    <button onClick={() => setEditing(r)} className="flex-1 min-w-0 text-left group">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-foreground truncate">{r.descripcion}</p>
-                        <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        {r.no_materializar && (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">auto · email</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
-                        <span>{r.categoria ?? 'Sin categoría'}</span><span className="opacity-40">·</span>
-                        <span>{FRECUENCIA_LABEL[r.frecuencia] ?? r.frecuencia}</span><span className="opacity-40">·</span>
-                        <span>Día {r.dia_del_mes}</span>
-                        {pagado && f?.fecha_pago && (
-                          <><span className="opacity-40">·</span><span className="text-success">pagado {fechaCorta(f.fecha_pago)}</span></>
-                        )}
-                      </div>
-                    </button>
-
-                    {/* Estado / chip */}
-                    {pagado ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-success/12 text-success whitespace-nowrap">
-                        ✓ pagado{f?.con_comprobante && <Paperclip className="w-2.5 h-2.5" />}
-                      </span>
-                    ) : pendienteDue ? (
-                      <span className={cn('text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap', chipTone[info.tone])}>{info.label}</span>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">día {r.dia_del_mes}</span>
-                    )}
-
-                    <div className="text-right w-24 flex-shrink-0">
-                      <p className="text-sm font-semibold text-foreground tabular">{monto}</p>
-                      {(r.frecuencia !== 'mensual' || ((r.ultimo_moneda ?? r.moneda) === 'USD' && tc_blue)) && (
-                        <p className="text-[11px] text-muted-foreground tabular">≈ {formatARS(r.mensual_ars)}/mes</p>
-                      )}
-                    </div>
-
-                    {/* Acción de pago. Si ya está pagado el mes, el botón registra
-                        la PRÓXIMA ocurrencia (adelantar). Disponible también en auto·email. */}
-                    {!pagado ? (
-                      <button
-                        onClick={() => setRegistrando(r)}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 whitespace-nowrap flex-shrink-0"
-                      >
-                        Pagar
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setRegistrando(r)}
-                        title={`Adelantar el pago de ${mesCorto(r.proximo_vencimiento)}`}
-                        className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap flex-shrink-0"
-                      >
-                        Pagar {mesCorto(r.proximo_vencimiento)}
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+        <div className="lg:col-span-2 space-y-5">
+          {/* Falta pagar */}
+          {fijos.pendientes.length > 0 && (
+            <Card>
+              <SectionHeader title="Falta pagar" count={fijos.pendientes.length} right={formatARS(fijos.total_pendiente_ars)} rightTone="crit" />
+              <div className="divide-y divide-border/70">
+                {fijos.pendientes.map(f => (
+                  <FijoRow key={f.id} f={f} rec={recById.get(f.id)} variant="pendiente"
+                    onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                ))}
+              </div>
+            </Card>
           )}
-        </Card>
+
+          {/* Pagados */}
+          {fijos.pagados.length > 0 && (
+            <Card>
+              <SectionHeader title={`Pagados en ${mesLabel.split(' ')[0]}`} count={fijos.pagados.length} right={formatARS(fijos.total_pagado_ars)} rightTone="good" />
+              <div className="divide-y divide-border/70">
+                {fijos.pagados.map(f => (
+                  <FijoRow key={f.id} f={f} rec={recById.get(f.id)} variant="pagado"
+                    onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Otros fijos (no vencen este mes) */}
+          {otros.length > 0 && (
+            <Card>
+              <SectionHeader title="Otros fijos" count={otros.length} subtitle="no vencen este mes" />
+              <div className="divide-y divide-border/70">
+                {otros.map(r => (
+                  <FijoRow key={r.id} rec={r} variant="otro" onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {recurrentes.length === 0 && (
+            <Card><CardContent className="py-12 text-center text-muted-foreground text-sm">No hay fijos activos. Creá el primero con “Nuevo fijo”.</CardContent></Card>
+          )}
+        </div>
 
         {/* Desglose por categoría */}
         <Card className="h-fit">
@@ -249,24 +187,20 @@ export default function RecurrentesView({
             {categoriasSorted.length === 0 ? (
               <p className="text-sm text-muted-foreground">Sin datos.</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3.5">
                 {categoriasSorted.map(({ cat, total }) => {
                   const pct = total_mensual_ars > 0 ? Math.round((total / total_mensual_ars) * 100) : 0
                   return (
                     <div key={cat}>
-                      <div className="flex justify-between text-xs mb-1">
+                      <div className="flex justify-between text-[13px] mb-1.5">
                         <span className="text-foreground/80">{cat}</span>
-                        <span className="font-medium text-foreground tabular">{formatARS(total)}</span>
+                        <span className="font-medium text-foreground tabular">{formatARS(total)} <span className="text-muted-foreground font-normal">{pct}%</span></span>
                       </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
-                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden"><div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} /></div>
                     </div>
                   )
                 })}
-                <p className="text-xs text-muted-foreground mt-4 pt-3 border-t border-border">
-                  Los montos en USD se convierten al TC oficial más reciente.
-                </p>
+                <p className="text-xs text-muted-foreground mt-4 pt-3 border-t border-border">Los montos en USD se convierten al TC oficial más reciente.</p>
               </div>
             )}
           </CardContent>
@@ -280,15 +214,93 @@ export default function RecurrentesView({
   )
 }
 
+function SectionHeader({ title, count, subtitle, right, rightTone }: {
+  title: string; count: number; subtitle?: string; right?: string; rightTone?: 'crit' | 'good'
+}) {
+  return (
+    <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+        <span className="text-[11px] font-semibold text-muted-foreground/70 tabular">{count}</span>
+        {subtitle && <span className="text-xs text-muted-foreground/70">· {subtitle}</span>}
+      </div>
+      {right && <span className={cn('text-sm font-semibold tabular', rightTone === 'crit' ? 'text-foreground' : 'text-success')}>{right}</span>}
+    </div>
+  )
+}
+
+function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
+  f?: FijoDelMes
+  rec?: RecurrenteConCosto
+  variant: 'pendiente' | 'pagado' | 'otro'
+  onEdit: (r: GastoRecurrente) => void
+  onPay: (r: RecurrenteConCosto) => void
+  nextMesCorto: string
+}) {
+  if (!rec) return null
+  const info = f ? vencInfo(f.dias_para_vencimiento) : vencInfo(rec.dias_para_vencimiento)
+  const stripe = variant === 'pagado' ? 'paid' : variant === 'pendiente' ? info.tone : 'muted'
+  const montoStr = (rec.ultimo_moneda ?? rec.moneda) === 'USD'
+    ? `US$ ${(rec.ultimo_monto_original ?? rec.monto_original).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+    : formatARS((f?.monto_ars) ?? rec.ultimo_monto_original ?? rec.monto_original)
+
+  return (
+    <div className={cn('flex items-center gap-4 px-5 py-4', variant === 'pagado' && 'opacity-[0.82]')}>
+      <span className={cn('w-1 self-stretch rounded-full flex-shrink-0', stripeTone[stripe])} />
+
+      <button onClick={() => onEdit(rec)} className="min-w-0 flex-1 text-left group">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground truncate">{rec.descripcion}</span>
+          {rec.no_materializar && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground flex-shrink-0">auto</span>}
+          <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+        </div>
+        <div className="text-xs text-muted-foreground mt-0.5 truncate">
+          {rec.categoria ?? 'Sin categoría'} · {FRECUENCIA_LABEL[rec.frecuencia] ?? rec.frecuencia} · día {rec.dia_del_mes}
+        </div>
+      </button>
+
+      {/* Estado */}
+      <div className="hidden sm:flex justify-end w-[132px] flex-shrink-0">
+        {variant === 'pagado' && f ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-success/12 text-success whitespace-nowrap">
+            ✓ {f.fecha_pago ? fechaCorta(f.fecha_pago) : 'pagado'}{f.con_comprobante && <Paperclip className="w-2.5 h-2.5" />}
+          </span>
+        ) : variant === 'pendiente' ? (
+          <span className={cn('text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap', chipTone[info.tone])}>{info.label}</span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap">próx. {fechaCorta(rec.proximo_vencimiento)}</span>
+        )}
+      </div>
+
+      {/* Monto */}
+      <div className="w-28 text-right flex-shrink-0">
+        <p className="text-sm font-semibold text-foreground tabular">{montoStr}</p>
+        {(rec.frecuencia !== 'mensual' || (rec.ultimo_moneda ?? rec.moneda) === 'USD') && (
+          <p className="text-[11px] text-muted-foreground tabular">≈ {formatARS(rec.mensual_ars)}/mes</p>
+        )}
+      </div>
+
+      {/* Acción */}
+      <div className="w-[104px] flex justify-end flex-shrink-0">
+        {variant === 'pendiente' ? (
+          <button onClick={() => onPay(rec)} className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 whitespace-nowrap">Pagar</button>
+        ) : variant === 'pagado' ? (
+          <button onClick={() => onPay(rec)} title={`Adelantar ${nextMesCorto}`} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar {nextMesCorto}</button>
+        ) : (
+          <button onClick={() => onPay(rec)} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Ring({ pct, pagados, total }: { pct: number; pagados: number; total: number }) {
   return (
-    <div
-      className="relative w-[104px] h-[104px] flex-shrink-0 rounded-full grid place-items-center"
-      style={{ background: `conic-gradient(hsl(var(--success)) ${pct * 3.6}deg, hsl(var(--muted)) 0)` }}
-    >
+    <div className="relative w-[108px] h-[108px] flex-shrink-0 rounded-full grid place-items-center"
+      style={{ background: `conic-gradient(hsl(var(--success)) ${pct * 3.6}deg, hsl(var(--muted)) 0)` }}>
       <div className="absolute inset-[11px] rounded-full bg-card" />
       <div className="relative text-center">
-        <div className="text-[21px] font-bold text-foreground leading-none tabular">{pagados}/{total}</div>
+        <div className="text-[22px] font-bold text-foreground leading-none tabular">{pagados}/{total}</div>
         <div className="text-[10px] text-muted-foreground mt-1 tracking-wide uppercase">pagados</div>
       </div>
     </div>

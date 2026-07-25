@@ -210,8 +210,9 @@ export default function RecurrentesView({
                       )}
                     </div>
 
-                    {/* Acción de pago */}
-                    {!pagado && !r.no_materializar ? (
+                    {/* Acción de pago — disponible siempre que no esté pagado,
+                        incluso en los auto·email por si querés pagarlo a mano. */}
+                    {!pagado ? (
                       <button
                         onClick={() => setRegistrando(r)}
                         className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 whitespace-nowrap flex-shrink-0"

@@ -82,6 +82,8 @@ export async function materializarRecurrentesAction(): Promise<{
           fuente: 'recurrente_auto',
           cuotas: 1,
           cuota_actual: 1,
+          es_recurrente: true,
+          recurrente_id: r.id,
         })
         insertados++
       }

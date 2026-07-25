@@ -16,11 +16,13 @@ import {
   Layers,
   History,
   Plus,
+  CalendarClock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
   { href: '/dashboard',    label: 'Panel',        icon: LayoutDashboard },
+  { href: '/agenda',       label: 'Lo que viene', icon: CalendarClock },
   { href: '/recurrentes',  label: 'Fijos',        icon: RefreshCw, badge: true },
   { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
   { href: '/gastos',       label: 'Gastos',       icon: CreditCard },

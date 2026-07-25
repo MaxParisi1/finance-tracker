@@ -508,6 +508,7 @@ export interface FijoDelMes {
   monto_ars: number
   frecuencia: string
   proximo_vencimiento: string
+  vencimiento: string // fecha de la ocurrencia en el mes consultado (YYYY-MM-DD)
   pagado: boolean
   fecha_pago?: string
   con_comprobante: boolean
@@ -648,6 +649,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
     if (pago) {
       const f: FijoDelMes = {
         ...base,
+        vencimiento: occ,
         monto_ars: pago.monto_ars || toARS(r.monto_original, r.moneda),
         pagado: true,
         fecha_pago: pago.fecha,
@@ -662,6 +664,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       if (creado && occ < creado) continue
       pendientes.push({
         ...base,
+        vencimiento: occ,
         monto_ars: toARS(r.monto_original, r.moneda),
         pagado: false,
         con_comprobante: false,
@@ -694,6 +697,78 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
     proximo_dias: pendientes.length ? pendientes[0].dias_para_vencimiento : null,
     pct_pagado: count_total ? Math.round((pagados.length / count_total) * 100) : 0,
   }
+}
+
+// ──────────────────────────────────────────────
+// Agenda / "Lo que viene" (fijos + cuotas por fecha)
+// ──────────────────────────────────────────────
+
+export interface Obligacion {
+  fecha: string
+  titulo: string
+  subtitulo: string
+  monto_ars: number
+  moneda: string
+  monto_original: number
+  tipo: 'fijo' | 'cuota'
+  estado: 'pendiente' | 'pagado'
+  recurrente_id?: string
+}
+
+/** Obligaciones de este mes y el próximo (fijos + cuotas), ordenadas por fecha. */
+export async function getAgenda(): Promise<Obligacion[]> {
+  const hoy = new Date()
+  const mes = hoy.getMonth() + 1
+  const anio = hoy.getFullYear()
+  const nMes = mes === 12 ? 1 : mes + 1
+  const nAnio = mes === 12 ? anio + 1 : anio
+
+  const [f1, f2, cuotas, planes] = await Promise.all([
+    getFijosDelMes(mes, anio),
+    getFijosDelMes(nMes, nAnio),
+    getCuotasActivas(),
+    getPlanesCuotaActivos(),
+  ])
+
+  const obs: Obligacion[] = []
+  for (const f of [...f1.pendientes, ...f1.pagados, ...f2.pendientes, ...f2.pagados]) {
+    obs.push({
+      fecha: f.vencimiento,
+      titulo: f.descripcion,
+      subtitulo: f.categoria ?? 'Fijo',
+      monto_ars: f.monto_ars,
+      moneda: f.moneda,
+      monto_original: f.monto_original,
+      tipo: 'fijo',
+      estado: f.pagado ? 'pagado' : 'pendiente',
+      recurrente_id: f.id,
+    })
+  }
+  for (const c of cuotas) {
+    obs.push({
+      fecha: c.proxima_fecha,
+      titulo: c.comercio || c.descripcion,
+      subtitulo: `Cuota ${c.cuota_pendiente}/${c.cuotas}`,
+      monto_ars: c.monto_ars,
+      moneda: c.moneda,
+      monto_original: c.monto_original,
+      tipo: 'cuota',
+      estado: 'pendiente',
+    })
+  }
+  for (const p of planes) {
+    obs.push({
+      fecha: p.proximo_vencimiento,
+      titulo: p.descripcion,
+      subtitulo: `Cuota ${p.cuota_actual}/${p.cuotas_total}`,
+      monto_ars: p.monto_cuota ?? 0,
+      moneda: p.moneda,
+      monto_original: p.monto_cuota ?? 0,
+      tipo: 'cuota',
+      estado: 'pendiente',
+    })
+  }
+  return obs.sort((a, b) => a.fecha.localeCompare(b.fecha))
 }
 
 // ──────────────────────────────────────────────

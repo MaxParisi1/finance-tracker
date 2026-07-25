@@ -13,21 +13,23 @@ import {
   History,
   Plus,
   MoreHorizontal,
+  CalendarClock,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const PRIMARY = [
   { href: '/dashboard',    label: 'Panel',        icon: LayoutDashboard },
+  { href: '/agenda',       label: 'Agenda',       icon: CalendarClock },
   { href: '/recurrentes',  label: 'Fijos',        icon: RefreshCw },
-  { href: '/comprobantes', label: 'Comprob.',     icon: FileText },
 ]
 
 const MORE = [
-  { href: '/gastos',     label: 'Gastos',     icon: CreditCard },
-  { href: '/analytics',  label: 'Analíticas', icon: BarChart3 },
-  { href: '/cuotas',     label: 'Cuotas',     icon: Layers },
-  { href: '/historico',  label: 'Histórico',  icon: History },
+  { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
+  { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
+  { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
+  { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
+  { href: '/historico',    label: 'Histórico',    icon: History },
 ]
 
 export default function BottomNav() {

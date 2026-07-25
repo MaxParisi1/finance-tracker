@@ -184,3 +184,24 @@ export async function deleteGastoAction(id: string) {
   revalidatePath('/gastos')
   revalidatePath('/dashboard')
 }
+
+export async function bulkRecategorizarAction(ids: string[], categoria: string) {
+  if (!ids.length || !categoria) return
+  const supabase = getSupabaseServer()
+  const { error } = await supabase.from('gastos').update({ categoria }).in('id', ids)
+  if (error) throw new Error(error.message)
+  revalidatePath('/gastos')
+  revalidatePath('/dashboard')
+}
+
+export async function bulkDeleteGastosAction(ids: string[]) {
+  if (!ids.length) return
+  const supabase = getSupabaseServer()
+  const { error } = await supabase
+    .from('gastos')
+    .update({ deleted_at: new Date().toISOString() })
+    .in('id', ids)
+  if (error) throw new Error(error.message)
+  revalidatePath('/gastos')
+  revalidatePath('/dashboard')
+}

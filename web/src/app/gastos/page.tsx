@@ -55,7 +55,14 @@ export default async function GastosPage({
           </div>
 
           {/* Tabla con search, filtros y export CSV */}
-          <GastosTableView gastos={gastos} categorias={categorias.map(c => c.nombre)} comercios={comercios} archivoCounts={archivoCounts} recurrentes={recurrentes} />
+          <GastosTableView
+            gastos={gastos}
+            categorias={categorias.map(c => c.nombre)}
+            colores={Object.fromEntries(categorias.map(c => [c.nombre, c.color]))}
+            comercios={comercios}
+            archivoCounts={archivoCounts}
+            recurrentes={recurrentes}
+          />
         </div>
       </main>
     </div>

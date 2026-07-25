@@ -526,71 +526,119 @@ export interface FijosDelMes {
   pct_pagado: number
 }
 
+/** Ocurrencia anterior a `p` según la frecuencia (proximo_vencimiento − 1 período). */
+function ocurrenciaAnterior(p: Date, frecuencia: string): Date {
+  if (frecuencia === 'anual') return new Date(p.getFullYear() - 1, p.getMonth(), p.getDate())
+  if (frecuencia === 'semanal') return new Date(p.getTime() - 7 * 86400000)
+  return new Date(p.getFullYear(), p.getMonth() - 1, p.getDate())
+}
+
 /**
  * Estado de los fijos (recurrentes) en un mes: cuáles ya pagaste y cuáles faltan.
- * "Pagado este mes" = existe un gasto vinculado (recurrente_id) con fecha en el mes.
+ *
+ * Se razona por ocurrencia usando `proximo_vencimiento` (la verdad de "qué es lo
+ * próximo que se debe"), no por la fecha del pago — así un fijo que vencía el 1
+ * de julio pero se pagó adelantado el 29 de junio cuenta como pagado de julio.
+ *
+ *  - Pendiente: proximo_vencimiento cae este mes o antes (se debe / vencido).
+ *  - Pagado:    proximo_vencimiento ya pasó a un mes futuro y la ocurrencia
+ *               anterior (proximo − 1 período) caía en este mes.
+ *  - Se excluye lo que no tiene ocurrencia este mes (ej: un anual de diciembre).
  */
 export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDelMes> {
   const supabase = getSupabaseServer()
-  const { desde, hasta } = monthRange(mes, anio)
+  const { desde, hasta } = monthRange(mes, anio) // 'YYYY-MM-01' inclusivo / exclusivo
 
   const [recurrentes, tcInfo] = await Promise.all([getRecurrentes(), getTipoCambioActual('oficial')])
   const tc = tcInfo?.valor ?? 1
+  const toARS = (m: number, mon: string) => (mon === 'USD' ? Math.round(m * tc) : m)
 
-  // Pagos del mes vinculados a un recurrente (el más reciente por recurrente)
+  // Pagos vinculados en una ventana amplia (incluye pagos adelantados del mes previo).
   const ids = recurrentes.map(r => r.id)
-  const pagoPorRec = new Map<string, { fecha: string; gasto_id: string }>()
-  const gastoIds: string[] = []
+  const ventanaDesde = new Date(anio, mes - 1, 1)
+  ventanaDesde.setDate(ventanaDesde.getDate() - 62)
+  const ventanaDesdeStr = ventanaDesde.toISOString().split('T')[0]
+
+  const pagosPorRec = new Map<string, { fecha: string; gasto_id: string; monto_ars: number }[]>()
   if (ids.length > 0) {
     const { data: pagos } = await supabase
       .from('gastos')
-      .select('id, recurrente_id, fecha')
+      .select('id, recurrente_id, fecha, monto_ars')
       .in('recurrente_id', ids)
-      .gte('fecha', desde)
+      .gte('fecha', ventanaDesdeStr)
       .lt('fecha', hasta)
       .is('deleted_at', null)
       .order('fecha', { ascending: false })
     for (const g of pagos ?? []) {
-      if (g.recurrente_id && !pagoPorRec.has(g.recurrente_id)) {
-        pagoPorRec.set(g.recurrente_id, { fecha: g.fecha, gasto_id: g.id })
-        gastoIds.push(g.id)
-      }
+      if (!g.recurrente_id) continue
+      const arr = pagosPorRec.get(g.recurrente_id) ?? []
+      arr.push({ fecha: g.fecha, gasto_id: g.id, monto_ars: g.monto_ars ?? 0 })
+      pagosPorRec.set(g.recurrente_id, arr)
     }
   }
-  const comprobantes = await contarArchivosPorGastos(gastoIds)
 
   const hoy = new Date()
   hoy.setHours(0, 0, 0, 0)
-  const toARS = (m: number, mon: string) => (mon === 'USD' ? Math.round(m * tc) : m)
 
-  const build = (r: GastoRecurrente): FijoDelMes => {
-    const pago = pagoPorRec.get(r.id)
+  const pagados: FijoDelMes[] = []
+  const pendientes: FijoDelMes[] = []
+  const settlingGastoIds: string[] = []
+  // { fijo, gasto_id } para resolver comprobantes en un segundo paso
+  const comprobantePend: { f: FijoDelMes; gasto_id: string }[] = []
+
+  for (const r of recurrentes) {
     const venc = new Date(r.proximo_vencimiento + 'T00:00:00')
     const dias = Math.round((venc.getTime() - hoy.getTime()) / 86400000)
-    return {
+    const base = {
       id: r.id,
       descripcion: r.descripcion,
       categoria: r.categoria,
       medio_pago: r.medio_pago,
       moneda: r.moneda,
       monto_original: r.monto_original,
-      monto_ars: toARS(r.monto_original, r.moneda),
       frecuencia: r.frecuencia,
       proximo_vencimiento: r.proximo_vencimiento,
-      pagado: !!pago,
-      fecha_pago: pago?.fecha,
-      con_comprobante: pago ? (comprobantes[pago.gasto_id] ?? 0) > 0 : false,
       dias_para_vencimiento: dias,
     }
+
+    if (r.proximo_vencimiento < hasta) {
+      // Pendiente: vence este mes o está vencido.
+      pendientes.push({
+        ...base,
+        monto_ars: toARS(r.monto_original, r.moneda),
+        pagado: false,
+        con_comprobante: false,
+      })
+      continue
+    }
+
+    // proximo ya pasó a un mes futuro → ¿la ocurrencia anterior era de este mes?
+    const ult = ocurrenciaAnterior(venc, r.frecuencia)
+    if (ult.getFullYear() === anio && ult.getMonth() + 1 === mes) {
+      // Pagado este mes. El pago que lo saldó es el más reciente anterior a proximo.
+      const settling = (pagosPorRec.get(r.id) ?? []).find(g => g.fecha < r.proximo_vencimiento)
+      const f: FijoDelMes = {
+        ...base,
+        monto_ars: settling?.monto_ars ?? toARS(r.monto_original, r.moneda),
+        pagado: true,
+        fecha_pago: settling?.fecha,
+        con_comprobante: false,
+      }
+      pagados.push(f)
+      if (settling) {
+        settlingGastoIds.push(settling.gasto_id)
+        comprobantePend.push({ f, gasto_id: settling.gasto_id })
+      }
+    }
+    // else: la ocurrencia no cae este mes → no pertenece al mes, se excluye.
   }
 
-  const pagados: FijoDelMes[] = []
-  const pendientes: FijoDelMes[] = []
-  for (const r of recurrentes) {
-    const f = build(r)
-    if (f.pagado) pagados.push(f)
-    else if (r.proximo_vencimiento < hasta) pendientes.push(f) // vence este mes o está vencido
+  // Resolver comprobantes de los pagos que saldaron cada fijo
+  const comprobantes = await contarArchivosPorGastos(settlingGastoIds)
+  for (const { f, gasto_id } of comprobantePend) {
+    f.con_comprobante = (comprobantes[gasto_id] ?? 0) > 0
   }
+
   pendientes.sort((a, b) => a.proximo_vencimiento.localeCompare(b.proximo_vencimiento))
   pagados.sort((a, b) => (b.fecha_pago ?? '').localeCompare(a.fecha_pago ?? ''))
 

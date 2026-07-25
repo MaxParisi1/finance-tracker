@@ -69,6 +69,7 @@ export default function HistoricoView({ meses, gastos, categorias, filtros }: Pr
   const totalARS = gastos.reduce((sum, g) => sum + (g.monto_ars ?? 0), 0)
   const promedioMensual = meses.length > 0 ? Math.round(totalARS / meses.length) : 0
   const hayFiltros = filtros.busqueda || filtros.categoria || filtros.medio_pago
+  const pico = meses.length > 0 ? meses.reduce((a, b) => (b.total_ars > a.total_ars ? b : a)) : null
 
   return (
     <div className="space-y-5">
@@ -142,15 +143,17 @@ export default function HistoricoView({ meses, gastos, categorias, filtros }: Pr
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total en el período', value: formatARS(Math.round(totalARS)) },
-          { label: `${gastos.length} transacciones`, value: `${meses.length} mes${meses.length !== 1 ? 'es' : ''}` },
-          { label: 'Promedio mensual', value: formatARS(promedioMensual) },
+          { label: 'Total en el período', value: formatARS(Math.round(totalARS)), sub: `${gastos.length} transacciones` },
+          { label: 'Promedio mensual', value: formatARS(promedioMensual), sub: `${meses.length} mes${meses.length !== 1 ? 'es' : ''}` },
+          { label: 'Mes más caro', value: pico ? formatARS(pico.total_ars) : '—', sub: pico?.label ?? '' },
+          { label: 'Este mes', value: formatARS(meses.at(-1)?.total_ars ?? 0), sub: meses.at(-1)?.label ?? '' },
         ].map(stat => (
           <div key={stat.label} className="rounded-xl border border-border bg-card px-4 py-3">
             <p className="text-xs text-muted-foreground">{stat.label}</p>
-            <p className="text-base font-semibold text-foreground mt-0.5">{stat.value}</p>
+            <p className="text-base font-semibold text-foreground mt-0.5 tabular">{stat.value}</p>
+            {stat.sub && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{stat.sub}</p>}
           </div>
         ))}
       </div>

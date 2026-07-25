@@ -8,6 +8,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts'
 import type { TendenciaMes } from '@/lib/types'
 
@@ -45,10 +46,20 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export default function SpendingTrendChart({ data }: Props) {
+  const conDato = data.filter(d => d.total_ars > 0)
+  const avg = conDato.length ? conDato.reduce((s, d) => s + d.total_ars, 0) / conDato.length : 0
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        {avg > 0 && (
+          <ReferenceLine
+            y={avg}
+            stroke="hsl(var(--muted-foreground))"
+            strokeDasharray="4 4"
+            label={{ value: `promedio ${formatK(avg)}`, position: 'insideTopLeft', fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+          />
+        )}
         <XAxis
           dataKey="label"
           tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}

@@ -14,16 +14,17 @@ import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({ searchParams }: { searchParams: { meses?: string } }) {
   const hoy = new Date()
   const mes = hoy.getMonth() + 1
   const anio = hoy.getFullYear()
   const mesAnioAnterior = anio - 1
+  const nMeses = searchParams.meses === '12' ? 12 : searchParams.meses === '3' ? 3 : 6
 
   const categorias = await getCategorias()
   const [tendencia, resumen, resumenYoY, topComercios, dailySpending, paymentMethods, tcInfo] =
     await Promise.all([
-      getTendencia(6),
+      getTendencia(nMeses),
       getResumenMes(mes, anio, categorias),
       getResumenMes(mes, mesAnioAnterior, categorias),
       getTopComercios(mes, anio, 10),
@@ -53,9 +54,20 @@ export default async function AnalyticsPage() {
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Analíticas</h1>
-            <p className="text-muted-foreground text-sm mt-1">Últimos 6 meses · actualizado en tiempo real</p>
+          <div className="mb-8 flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Analíticas</h1>
+              <p className="text-muted-foreground text-sm mt-1">Últimos {nMeses} meses · actualizado en tiempo real</p>
+            </div>
+            <div className="flex rounded-lg border border-input p-1 bg-background">
+              {[3, 6, 12].map(n => (
+                <a key={n} href={`/analytics?meses=${n}`}
+                  className={cn('px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                    nMeses === n ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}>
+                  {n}m
+                </a>
+              ))}
+            </div>
           </div>
 
           {/* KPIs */}
@@ -102,7 +114,7 @@ export default async function AnalyticsPage() {
               <div className="flex items-start justify-between">
                 <div>
                   <CardTitle className="text-base">Tendencia de gasto</CardTitle>
-                  <CardDescription>Últimos 6 meses en ARS</CardDescription>
+                  <CardDescription>Últimos {nMeses} meses · línea punteada = promedio</CardDescription>
                 </div>
                 {tendencia.at(-1)?.variacion_pct != null && (
                   <span className={cn(
@@ -125,7 +137,7 @@ export default async function AnalyticsPage() {
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="text-base">Gasto diario — {monthLabel(mes, anio)}</CardTitle>
-              <CardDescription>Barras: gasto del día · Línea: acumulado del mes</CardDescription>
+              <CardDescription>Barras oscuras = días por encima de tu promedio diario</CardDescription>
             </CardHeader>
             <CardContent className="pt-0">
               {dailySpending.length > 0 ? (

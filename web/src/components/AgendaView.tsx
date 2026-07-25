@@ -56,13 +56,14 @@ export default function AgendaView({
     { mes: now.getMonth() === 11 ? 1 : now.getMonth() + 2, anio: now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear() },
   ]
 
-  // Agenda: pendientes desde hoy, agrupadas por fecha
+  // Agenda: pendientes desde hoy, agrupadas por fecha (o por mes si es sin día fija)
   const upcoming = pendientes.filter(o => o.fecha >= hoy).sort((a, b) => a.fecha.localeCompare(b.fecha))
-  const grupos: { fecha: string; items: Obligacion[] }[] = []
+  const grupos: { key: string; fecha: string; sinFecha: boolean; items: Obligacion[] }[] = []
   for (const o of upcoming) {
+    const key = o.sin_fecha ? `m:${o.fecha.slice(0, 7)}` : o.fecha
     const last = grupos[grupos.length - 1]
-    if (last && last.fecha === o.fecha) last.items.push(o)
-    else grupos.push({ fecha: o.fecha, items: [o] })
+    if (last && last.key === key) last.items.push(o)
+    else grupos.push({ key, fecha: o.fecha, sinFecha: o.sin_fecha, items: [o] })
   }
 
   return (
@@ -111,11 +112,14 @@ export default function AgendaView({
             ) : (
               <div className="divide-y divide-border/70 max-h-[560px] overflow-y-auto">
                 {grupos.map(g => {
-                  const vencido = g.fecha < hoy
+                  const vencido = !g.sinFecha && g.fecha < hoy
+                  const label = g.sinFecha
+                    ? `${MONTH_NAMES_CAP[Number(g.fecha.split('-')[1]) - 1]} · sin día fija`
+                    : fechaLabel(g.fecha)
                   return (
-                    <div key={g.fecha} className="px-5 py-3">
+                    <div key={g.key} className="px-5 py-3">
                       <div className="flex items-baseline justify-between mb-2">
-                        <span className={cn('text-xs font-semibold uppercase tracking-wide', vencido ? 'text-destructive' : 'text-muted-foreground')}>{fechaLabel(g.fecha)}</span>
+                        <span className={cn('text-xs font-semibold uppercase tracking-wide', vencido ? 'text-destructive' : 'text-muted-foreground')}>{label}</span>
                         <span className="text-xs font-semibold text-foreground tabular">{formatARS(g.items.reduce((s, o) => s + o.monto_ars, 0))}</span>
                       </div>
                       <div className="space-y-2">
@@ -162,6 +166,7 @@ function MesCalendario({ mes, anio, obligaciones, hoy }: { mes: number; anio: nu
   // Obligaciones por día
   const porDia = new Map<number, Obligacion[]>()
   for (const o of obligaciones) {
+    if (o.sin_fecha) continue // sin día fija → no se ubica en el calendario
     const [y, m] = o.fecha.split('-').map(Number)
     if (y === anio && m === mes) {
       const d = Number(o.fecha.split('-')[2])

@@ -35,6 +35,8 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
   const [isPending, startTransition] = useTransition()
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Sin día fijo: mensual que se paga/debita en cualquier momento del mes
+  const [sinDia, setSinDia] = useState(recurrente ? recurrente.dia_del_mes == null : false)
 
   const [form, setForm] = useState({
     descripcion: recurrente?.descripcion ?? '',
@@ -47,6 +49,8 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     no_materializar: recurrente?.no_materializar ?? false,
   })
 
+  const usaSinDia = form.frecuencia === 'mensual' && sinDia
+
   function set(field: string, value: string | number) {
     setForm(prev => ({ ...prev, [field]: value }))
   }
@@ -55,11 +59,12 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     setError(null)
     startTransition(async () => {
       try {
+        const payload = { ...form, dia_del_mes: usaSinDia ? null : form.dia_del_mes }
         if (isEdit) {
-          await updateRecurrenteAction(recurrente!.id, form)
+          await updateRecurrenteAction(recurrente!.id, payload)
           toast.success('Recurrente actualizado')
         } else {
-          await createRecurrenteAction(form)
+          await createRecurrenteAction(payload)
           toast.success('Gasto recurrente creado')
         }
         onClose()
@@ -144,15 +149,35 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
                 {FRECUENCIA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-            <div>
-              <label className={labelClass}>Día del mes</label>
-              <input
-                type="number" min={1} max={31} value={form.dia_del_mes}
-                onChange={e => set('dia_del_mes', parseInt(e.target.value) || 1)}
-                className={cn(fieldClass, 'w-20')}
-              />
-            </div>
+            {!usaSinDia && (
+              <div>
+                <label className={labelClass}>Día del mes</label>
+                <input
+                  type="number" min={1} max={31} value={form.dia_del_mes ?? 1}
+                  onChange={e => set('dia_del_mes', parseInt(e.target.value) || 1)}
+                  className={cn(fieldClass, 'w-20')}
+                />
+              </div>
+            )}
           </div>
+
+          {form.frecuencia === 'mensual' && (
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sinDia}
+                onChange={e => {
+                  setSinDia(e.target.checked)
+                  if (!e.target.checked && form.dia_del_mes == null) set('dia_del_mes', 1)
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+              />
+              <div>
+                <p className="text-sm font-medium text-foreground">Sin día fijo de vencimiento</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Se paga/debita en cualquier momento del mes (no va al calendario)</p>
+              </div>
+            </label>
+          )}
 
           <div>
             <label className={labelClass}>Categoría</label>

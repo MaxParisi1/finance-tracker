@@ -255,7 +255,8 @@ function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
           <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
         </div>
         <div className="text-xs text-muted-foreground mt-0.5 truncate">
-          {rec.categoria ?? 'Sin categoría'} · {FRECUENCIA_LABEL[rec.frecuencia] ?? rec.frecuencia} · día {rec.dia_del_mes}
+          {rec.categoria ?? 'Sin categoría'} · {FRECUENCIA_LABEL[rec.frecuencia] ?? rec.frecuencia}
+          {' · '}{rec.dia_del_mes != null ? `día ${rec.dia_del_mes}` : 'sin día fija'}
         </div>
       </button>
 
@@ -266,7 +267,11 @@ function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
             ✓ {f.fecha_pago ? fechaCorta(f.fecha_pago) : 'pagado'}{f.con_comprobante && <Paperclip className="w-2.5 h-2.5" />}
           </span>
         ) : variant === 'pendiente' ? (
-          <span className={cn('text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap', chipTone[info.tone])}>{info.label}</span>
+          f?.sin_dia ? (
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap bg-muted text-muted-foreground">este mes</span>
+          ) : (
+            <span className={cn('text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap', chipTone[info.tone])}>{info.label}</span>
+          )
         ) : (
           <span className="text-[11px] text-muted-foreground whitespace-nowrap">próx. {fechaCorta(rec.proximo_vencimiento)}</span>
         )}

@@ -6,8 +6,12 @@ import { getTipoCambioActual } from '@/lib/queries'
 import { recurrenteSchema } from '@/lib/validation'
 import { subirArchivoDrive } from '@/lib/drive'
 
-function nextDueDate(diaDelMes: number, frecuencia: string): string {
+function nextDueDate(diaDelMes: number | null, frecuencia: string): string {
   const hoy = new Date()
+  if (diaDelMes == null) {
+    // Sin día fija → fin del mes actual como ancla nominal (no se muestra como vencimiento).
+    return new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().split('T')[0]
+  }
   let d = new Date(hoy.getFullYear(), hoy.getMonth(), diaDelMes)
   if (d < hoy) {
     if (frecuencia === 'anual') {
@@ -122,7 +126,7 @@ export async function createRecurrenteAction(fields: {
   categoria: string
   medio_pago: string
   frecuencia: string
-  dia_del_mes: number
+  dia_del_mes: number | null
   no_materializar?: boolean
 }) {
   const parsed = recurrenteSchema.safeParse(fields)
@@ -151,7 +155,7 @@ export async function updateRecurrenteAction(
     categoria: string
     medio_pago: string
     frecuencia: string
-    dia_del_mes: number
+    dia_del_mes: number | null
     no_materializar?: boolean
   },
 ) {

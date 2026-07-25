@@ -28,7 +28,7 @@ export interface GastoRecurrente {
   categoria: string
   medio_pago: string
   frecuencia: string
-  dia_del_mes: number
+  dia_del_mes: number | null // null = mensual sin día fija (se paga en el mes, sin vencimiento)
   activo: boolean
   proximo_vencimiento: string
   no_materializar: boolean

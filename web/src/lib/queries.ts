@@ -508,7 +508,8 @@ export interface FijoDelMes {
   monto_ars: number
   frecuencia: string
   proximo_vencimiento: string
-  vencimiento: string // fecha de la ocurrencia en el mes consultado (YYYY-MM-DD)
+  vencimiento: string // fecha de la ocurrencia en el mes (YYYY-MM-DD); '' si es sin día fija
+  sin_dia: boolean    // mensual sin día fija (se paga en el mes, sin vencimiento en el calendario)
   pagado: boolean
   fecha_pago?: string
   con_comprobante: boolean
@@ -560,6 +561,8 @@ function mesDelPagoMensual(fecha: string, dia: number): string {
  * `belongs=false` cuando el fijo no tiene ocurrencia en ese mes (ej: un anual de otro mes).
  */
 function ocurrenciaDelMes(r: GastoRecurrente, mes: number, anio: number): { belongs: boolean; occ: string } {
+  // Mensual sin día fija → pertenece al mes pero no tiene fecha de vencimiento.
+  if (r.frecuencia === 'mensual' && r.dia_del_mes == null) return { belongs: true, occ: '' }
   const [, pm, pd] = r.proximo_vencimiento.split('-').map(Number)
   const dia = r.dia_del_mes || pd || 1
   if (r.frecuencia === 'anual') {
@@ -619,8 +622,9 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
   const pagoDelMes = (r: GastoRecurrente, occ: string) => {
     const pagos = pagosPorRec.get(r.id) ?? []
     if (r.frecuencia === 'mensual') {
-      const dia = r.dia_del_mes || 1
-      return pagos.find(g => mesDelPagoMensual(g.fecha, dia) === keyMes)
+      // Sin día fija: cuenta el pago cuyo MES CALENDARIO coincide (regla simple y predecible).
+      if (r.dia_del_mes == null) return pagos.find(g => g.fecha.slice(0, 7) === keyMes)
+      return pagos.find(g => mesDelPagoMensual(g.fecha, r.dia_del_mes!) === keyMes)
     }
     const occT = new Date(occ + 'T00:00:00').getTime()
     return pagos.find(g => Math.abs(new Date(g.fecha + 'T00:00:00').getTime() - occT) <= 30 * DAY)
@@ -645,30 +649,38 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       proximo_vencimiento: r.proximo_vencimiento,
     }
 
+    const sinDia = r.frecuencia === 'mensual' && r.dia_del_mes == null
+    const dias = sinDia ? 999 : diasHasta(occ)
+
     const pago = pagoDelMes(r, occ)
     if (pago) {
       const f: FijoDelMes = {
         ...base,
         vencimiento: occ,
+        sin_dia: sinDia,
         monto_ars: pago.monto_ars || toARS(r.monto_original, r.moneda),
         pagado: true,
         fecha_pago: pago.fecha,
         con_comprobante: false,
-        dias_para_vencimiento: diasHasta(occ),
+        dias_para_vencimiento: dias,
       }
       pagados.push(f)
       comprobantePend.push({ f, gasto_id: pago.gasto_id })
     } else {
       // Si el fijo se creó después de la ocurrencia, no lo debías ese mes.
       const creado = (r.created_at ?? '').split('T')[0]
-      if (creado && occ < creado) continue
+      if (creado) {
+        if (sinDia) { if (creado.slice(0, 7) > keyMes) continue }
+        else if (occ < creado) continue
+      }
       pendientes.push({
         ...base,
         vencimiento: occ,
+        sin_dia: sinDia,
         monto_ars: toARS(r.monto_original, r.moneda),
         pagado: false,
         con_comprobante: false,
-        dias_para_vencimiento: diasHasta(occ),
+        dias_para_vencimiento: dias,
       })
     }
   }
@@ -704,7 +716,8 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
 // ──────────────────────────────────────────────
 
 export interface Obligacion {
-  fecha: string
+  fecha: string        // para sin_fecha: último día del mes (solo para ordenar/agrupar, no se ubica en el calendario)
+  sin_fecha: boolean
   titulo: string
   subtitulo: string
   monto_ars: number
@@ -731,41 +744,42 @@ export async function getAgenda(): Promise<Obligacion[]> {
   ])
 
   const obs: Obligacion[] = []
-  for (const f of [...f1.pendientes, ...f1.pagados, ...f2.pendientes, ...f2.pagados]) {
-    obs.push({
-      fecha: f.vencimiento,
-      titulo: f.descripcion,
-      subtitulo: f.categoria ?? 'Fijo',
-      monto_ars: f.monto_ars,
-      moneda: f.moneda,
-      monto_original: f.monto_original,
-      tipo: 'fijo',
-      estado: f.pagado ? 'pagado' : 'pendiente',
-      recurrente_id: f.id,
-    })
+  const finDeMes = (m: number, a: number) => `${a}-${pad2(m)}-${pad2(new Date(a, m, 0).getDate())}`
+  const pushFijos = (set: FijosDelMes, m: number, a: number) => {
+    for (const f of [...set.pendientes, ...set.pagados]) {
+      obs.push({
+        fecha: f.sin_dia ? finDeMes(m, a) : f.vencimiento,
+        sin_fecha: f.sin_dia,
+        titulo: f.descripcion,
+        subtitulo: f.categoria ?? 'Fijo',
+        monto_ars: f.monto_ars,
+        moneda: f.moneda,
+        monto_original: f.monto_original,
+        tipo: 'fijo',
+        estado: f.pagado ? 'pagado' : 'pendiente',
+        recurrente_id: f.id,
+      })
+    }
   }
+  pushFijos(f1, mes, anio)
+  pushFijos(f2, nMes, nAnio)
+
   for (const c of cuotas) {
     obs.push({
-      fecha: c.proxima_fecha,
+      fecha: c.proxima_fecha, sin_fecha: false,
       titulo: c.comercio || c.descripcion,
       subtitulo: `Cuota ${c.cuota_pendiente}/${c.cuotas}`,
-      monto_ars: c.monto_ars,
-      moneda: c.moneda,
-      monto_original: c.monto_original,
-      tipo: 'cuota',
-      estado: 'pendiente',
+      monto_ars: c.monto_ars, moneda: c.moneda, monto_original: c.monto_original,
+      tipo: 'cuota', estado: 'pendiente',
     })
   }
   for (const p of planes) {
     obs.push({
-      fecha: p.proximo_vencimiento,
+      fecha: p.proximo_vencimiento, sin_fecha: false,
       titulo: p.descripcion,
       subtitulo: `Cuota ${p.cuota_actual}/${p.cuotas_total}`,
-      monto_ars: p.monto_cuota ?? 0,
-      moneda: p.moneda,
-      monto_original: p.monto_cuota ?? 0,
-      tipo: 'cuota',
-      estado: 'pendiente',
+      monto_ars: p.monto_cuota ?? 0, moneda: p.moneda, monto_original: p.monto_cuota ?? 0,
+      tipo: 'cuota', estado: 'pendiente',
     })
   }
   return obs.sort((a, b) => a.fecha.localeCompare(b.fecha))

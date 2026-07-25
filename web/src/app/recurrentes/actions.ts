@@ -6,20 +6,25 @@ import { getTipoCambioActual } from '@/lib/queries'
 import { recurrenteSchema } from '@/lib/validation'
 import { subirArchivoDrive } from '@/lib/drive'
 
-function nextDueDate(diaDelMes: number | null, frecuencia: string): string {
+function nextDueDate(diaDelMes: number | null, frecuencia: string, mesDelAnio?: number): string {
   const hoy = new Date()
+
+  if (frecuencia === 'anual') {
+    const mesIdx = (mesDelAnio ?? hoy.getMonth() + 1) - 1
+    const ultimo = new Date(hoy.getFullYear(), mesIdx + 1, 0).getDate()
+    const dia = Math.min(diaDelMes ?? ultimo, ultimo) // sin día → último día del mes (nominal)
+    let d = new Date(hoy.getFullYear(), mesIdx, dia)
+    if (d < hoy) d = new Date(hoy.getFullYear() + 1, mesIdx, dia)
+    return d.toISOString().split('T')[0]
+  }
+
   if (diaDelMes == null) {
-    // Sin día fija → fin del mes actual como ancla nominal (no se muestra como vencimiento).
+    // Mensual sin día fija → fin del mes actual como ancla nominal.
     return new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().split('T')[0]
   }
+
   let d = new Date(hoy.getFullYear(), hoy.getMonth(), diaDelMes)
-  if (d < hoy) {
-    if (frecuencia === 'anual') {
-      d = new Date(hoy.getFullYear() + 1, hoy.getMonth(), diaDelMes)
-    } else {
-      d = new Date(hoy.getFullYear(), hoy.getMonth() + 1, diaDelMes)
-    }
-  }
+  if (d < hoy) d = new Date(hoy.getFullYear(), hoy.getMonth() + 1, diaDelMes)
   return d.toISOString().split('T')[0]
 }
 
@@ -127,16 +132,18 @@ export async function createRecurrenteAction(fields: {
   medio_pago: string
   frecuencia: string
   dia_del_mes: number | null
+  mes_del_anio?: number
   no_materializar?: boolean
 }) {
   const parsed = recurrenteSchema.safeParse(fields)
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
 
   const supabase = getSupabaseServer()
-  const proximo_vencimiento = nextDueDate(fields.dia_del_mes, fields.frecuencia)
+  const { mes_del_anio, ...dbFields } = fields // mes_del_anio no es columna
+  const proximo_vencimiento = nextDueDate(fields.dia_del_mes, fields.frecuencia, mes_del_anio)
 
   const { error } = await supabase.from('gastos_recurrentes').insert({
-    ...fields,
+    ...dbFields,
     moneda: fields.moneda.toUpperCase(),
     activo: true,
     proximo_vencimiento,
@@ -156,6 +163,7 @@ export async function updateRecurrenteAction(
     medio_pago: string
     frecuencia: string
     dia_del_mes: number | null
+    mes_del_anio?: number
     no_materializar?: boolean
   },
 ) {
@@ -163,11 +171,12 @@ export async function updateRecurrenteAction(
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
 
   const supabase = getSupabaseServer()
-  const proximo_vencimiento = nextDueDate(fields.dia_del_mes, fields.frecuencia)
+  const { mes_del_anio, ...dbFields } = fields // mes_del_anio no es columna
+  const proximo_vencimiento = nextDueDate(fields.dia_del_mes, fields.frecuencia, mes_del_anio)
 
   const { error } = await supabase
     .from('gastos_recurrentes')
-    .update({ ...fields, moneda: fields.moneda.toUpperCase(), proximo_vencimiento })
+    .update({ ...dbFields, moneda: fields.moneda.toUpperCase(), proximo_vencimiento })
     .eq('id', id)
 
   if (error) throw new Error(error.message)

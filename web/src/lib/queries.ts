@@ -561,9 +561,11 @@ function mesDelPagoMensual(fecha: string, dia: number): string {
  * `belongs=false` cuando el fijo no tiene ocurrencia en ese mes (ej: un anual de otro mes).
  */
 function ocurrenciaDelMes(r: GastoRecurrente, mes: number, anio: number): { belongs: boolean; occ: string } {
-  // Mensual sin día fija → pertenece al mes pero no tiene fecha de vencimiento.
-  if (r.frecuencia === 'mensual' && r.dia_del_mes == null) return { belongs: true, occ: '' }
   const [, pm, pd] = r.proximo_vencimiento.split('-').map(Number)
+  // Mensual sin día fija → pertenece a todos los meses, sin fecha de vencimiento.
+  if (r.frecuencia === 'mensual' && r.dia_del_mes == null) return { belongs: true, occ: '' }
+  // Anual sin día fija → pertenece solo a su mes aniversario (el de proximo_vencimiento).
+  if (r.frecuencia === 'anual' && r.dia_del_mes == null) return { belongs: pm === mes, occ: '' }
   const dia = r.dia_del_mes || pd || 1
   if (r.frecuencia === 'anual') {
     const a = anclaDia(anio, mes - 1, dia)
@@ -622,9 +624,14 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
   const pagoDelMes = (r: GastoRecurrente, occ: string) => {
     const pagos = pagosPorRec.get(r.id) ?? []
     if (r.frecuencia === 'mensual') {
-      // Sin día fija: cuenta el pago cuyo MES CALENDARIO coincide (regla simple y predecible).
-      if (r.dia_del_mes == null) return pagos.find(g => g.fecha.slice(0, 7) === keyMes)
-      return pagos.find(g => mesDelPagoMensual(g.fecha, r.dia_del_mes!) === keyMes)
+      // Sin día usa día-1 nominal → los últimos días del mes cuentan para el siguiente
+      // (pago adelantado, ej: AySA pagado el 30-jun cuenta para julio).
+      const dia = r.dia_del_mes ?? 1
+      return pagos.find(g => mesDelPagoMensual(g.fecha, dia) === keyMes)
+    }
+    if (r.frecuencia === 'anual' && r.dia_del_mes == null) {
+      // Anual sin día: mismo mes calendario y año.
+      return pagos.find(g => g.fecha.slice(0, 7) === keyMes)
     }
     const occT = new Date(occ + 'T00:00:00').getTime()
     return pagos.find(g => Math.abs(new Date(g.fecha + 'T00:00:00').getTime() - occT) <= 30 * DAY)
@@ -649,7 +656,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       proximo_vencimiento: r.proximo_vencimiento,
     }
 
-    const sinDia = r.frecuencia === 'mensual' && r.dia_del_mes == null
+    const sinDia = r.dia_del_mes == null && (r.frecuencia === 'mensual' || r.frecuencia === 'anual')
     const dias = sinDia ? 999 : diasHasta(occ)
 
     const pago = pagoDelMes(r, occ)

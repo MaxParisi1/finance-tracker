@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import type { GastoRecurrente } from '@/lib/types'
 import { createRecurrenteAction, updateRecurrenteAction, toggleRecurrenteAction } from '@/app/recurrentes/actions'
-import { MEDIO_PAGO_LABELS } from '@/lib/utils'
+import { MEDIO_PAGO_LABELS, MONTH_NAMES_CAP } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
@@ -46,10 +46,13 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     medio_pago: recurrente?.medio_pago ?? 'debito',
     frecuencia: recurrente?.frecuencia ?? 'mensual',
     dia_del_mes: recurrente?.dia_del_mes ?? 1,
+    mes_del_anio: recurrente?.proximo_vencimiento
+      ? (parseInt(recurrente.proximo_vencimiento.split('-')[1]) || new Date().getMonth() + 1)
+      : new Date().getMonth() + 1,
     no_materializar: recurrente?.no_materializar ?? false,
   })
 
-  const usaSinDia = form.frecuencia === 'mensual' && sinDia
+  const usaSinDia = (form.frecuencia === 'mensual' || form.frecuencia === 'anual') && sinDia
 
   function set(field: string, value: string | number) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -59,7 +62,11 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     setError(null)
     startTransition(async () => {
       try {
-        const payload = { ...form, dia_del_mes: usaSinDia ? null : form.dia_del_mes }
+        const payload = {
+          ...form,
+          dia_del_mes: usaSinDia ? null : form.dia_del_mes,
+          mes_del_anio: form.frecuencia === 'anual' ? form.mes_del_anio : undefined,
+        }
         if (isEdit) {
           await updateRecurrenteAction(recurrente!.id, payload)
           toast.success('Recurrente actualizado')
@@ -142,16 +149,24 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
             </div>
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex-1">
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-[120px]">
               <label className={labelClass}>Frecuencia</label>
               <select value={form.frecuencia} onChange={e => set('frecuencia', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
                 {FRECUENCIA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
+            {form.frecuencia === 'anual' && (
+              <div className="flex-1 min-w-[120px]">
+                <label className={labelClass}>Mes</label>
+                <select value={form.mes_del_anio} onChange={e => set('mes_del_anio', parseInt(e.target.value))} className={cn(fieldClass, 'cursor-pointer')}>
+                  {MONTH_NAMES_CAP.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                </select>
+              </div>
+            )}
             {!usaSinDia && (
               <div>
-                <label className={labelClass}>Día del mes</label>
+                <label className={labelClass}>{form.frecuencia === 'semanal' ? 'Día' : 'Día del mes'}</label>
                 <input
                   type="number" min={1} max={31} value={form.dia_del_mes ?? 1}
                   onChange={e => set('dia_del_mes', parseInt(e.target.value) || 1)}
@@ -161,7 +176,7 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
             )}
           </div>
 
-          {form.frecuencia === 'mensual' && (
+          {(form.frecuencia === 'mensual' || form.frecuencia === 'anual') && (
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -174,7 +189,11 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
               />
               <div>
                 <p className="text-sm font-medium text-foreground">Sin día fijo de vencimiento</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Se paga/debita en cualquier momento del mes (no va al calendario)</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {form.frecuencia === 'anual'
+                    ? 'Se paga en cualquier momento de ese mes (no va al calendario)'
+                    : 'Se paga/debita en cualquier momento del mes (no va al calendario)'}
+                </p>
               </div>
             </label>
           )}

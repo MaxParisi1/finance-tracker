@@ -20,16 +20,20 @@ const ACCEPT = 'application/pdf,image/jpeg,image/png,image/webp,image/heic'
 
 interface Props {
   recurrente: RecurrenteConCosto
+  /** Fecha precargada. En un adelanto, el 1° del mes objetivo (así se atribuye a ese mes). */
+  fechaDefault?: string
+  /** Nombre del mes que se está saldando (ej. "agosto") — solo para adelantos. */
+  mesObjetivoLabel?: string
   onClose: () => void
 }
 
-export default function RegistrarCobroModal({ recurrente: r, onClose }: Props) {
+export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesObjetivoLabel, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [tipo_doc, setTipoDoc] = useState('factura')
   const [monto, setMonto] = useState(String(r.ultimo_monto_original ?? r.monto_original))
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(fechaDefault ?? new Date().toISOString().split('T')[0])
   const [dragOver, setDragOver] = useState(false)
   const [done, setDone] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -96,7 +100,10 @@ export default function RegistrarCobroModal({ recurrente: r, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
-            <h2 className="text-base font-semibold">Registrar cobro</h2>
+            <h2 className="text-base font-semibold">
+              Registrar cobro
+              {mesObjetivoLabel && <span className="text-primary font-medium"> · {mesObjetivoLabel}</span>}
+            </h2>
             <p className="text-xs text-muted-foreground mt-0.5">{r.descripcion}</p>
           </div>
           <button

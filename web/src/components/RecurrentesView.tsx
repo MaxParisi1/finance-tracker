@@ -50,7 +50,7 @@ export default function RecurrentesView({
   tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
-  const [registrando, setRegistrando] = useState<RecurrenteConCosto | null>(null)
+  const [registrando, setRegistrando] = useState<{ rec: RecurrenteConCosto; fechaDefault?: string; mesLabel?: string } | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [materializeResult, setMaterializeResult] = useState<{ insertados: number; omitidos: number; errores: string[] } | null>(null)
@@ -59,6 +59,14 @@ export default function RecurrentesView({
   const enMes = new Set([...fijos.pendientes, ...fijos.pagados].map(f => f.id))
   const otros = recurrentes.filter(r => !enMes.has(r.id))
   const nextMesCorto = new Date(anio, mes, 1).toLocaleDateString('es-AR', { month: 'short' })
+  // Adelanto: el pago apunta al 1° del mes siguiente (mapea inequívocamente a ese mes,
+  // sin importar el día del fijo). Ver mesDelPagoMensual() en queries.ts.
+  const nextMes = mes === 12 ? 1 : mes + 1
+  const nextAnio = mes === 12 ? anio + 1 : anio
+  const fechaAdelanto = `${nextAnio}-${String(nextMes).padStart(2, '0')}-01`
+  const nextMesLabel = new Date(nextAnio, nextMes - 1, 1).toLocaleDateString('es-AR', { month: 'long' })
+  const abrirCobro = (rec: RecurrenteConCosto, adelanto?: boolean) =>
+    setRegistrando(adelanto ? { rec, fechaDefault: fechaAdelanto, mesLabel: nextMesLabel } : { rec })
 
   const porCategoria = new Map<string, number>()
   for (const r of recurrentes) porCategoria.set(r.categoria ?? 'Sin categoría', (porCategoria.get(r.categoria ?? 'Sin categoría') ?? 0) + r.mensual_ars)
@@ -144,7 +152,7 @@ export default function RecurrentesView({
               <div className="divide-y divide-border/70">
                 {fijos.pendientes.map(f => (
                   <FijoRow key={f.id} f={f} rec={recById.get(f.id)} variant="pendiente"
-                    onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                    onEdit={setEditing} onPay={abrirCobro} nextMesCorto={nextMesCorto} />
                 ))}
               </div>
             </Card>
@@ -157,7 +165,7 @@ export default function RecurrentesView({
               <div className="divide-y divide-border/70">
                 {fijos.pagados.map(f => (
                   <FijoRow key={f.id} f={f} rec={recById.get(f.id)} variant="pagado"
-                    onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                    onEdit={setEditing} onPay={abrirCobro} nextMesCorto={nextMesCorto} />
                 ))}
               </div>
             </Card>
@@ -169,7 +177,7 @@ export default function RecurrentesView({
               <SectionHeader title="Otros fijos" count={otros.length} subtitle="no vencen este mes" />
               <div className="divide-y divide-border/70">
                 {otros.map(r => (
-                  <FijoRow key={r.id} rec={r} variant="otro" onEdit={setEditing} onPay={setRegistrando} nextMesCorto={nextMesCorto} />
+                  <FijoRow key={r.id} rec={r} variant="otro" onEdit={setEditing} onPay={abrirCobro} nextMesCorto={nextMesCorto} />
                 ))}
               </div>
             </Card>
@@ -209,7 +217,14 @@ export default function RecurrentesView({
 
       {editing && <RecurrenteModal recurrente={editing} categorias={categorias} onClose={() => setEditing(null)} />}
       {showNew && <RecurrenteModal categorias={categorias} onClose={() => setShowNew(false)} />}
-      {registrando && <RegistrarCobroModal recurrente={registrando} onClose={() => setRegistrando(null)} />}
+      {registrando && (
+        <RegistrarCobroModal
+          recurrente={registrando.rec}
+          fechaDefault={registrando.fechaDefault}
+          mesObjetivoLabel={registrando.mesLabel}
+          onClose={() => setRegistrando(null)}
+        />
+      )}
     </>
   )
 }
@@ -234,7 +249,7 @@ function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
   rec?: RecurrenteConCosto
   variant: 'pendiente' | 'pagado' | 'otro'
   onEdit: (r: GastoRecurrente) => void
-  onPay: (r: RecurrenteConCosto) => void
+  onPay: (r: RecurrenteConCosto, adelanto?: boolean) => void
   nextMesCorto: string
 }) {
   if (!rec) return null
@@ -290,7 +305,7 @@ function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
         {variant === 'pendiente' ? (
           <button onClick={() => onPay(rec)} className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 whitespace-nowrap">Pagar</button>
         ) : variant === 'pagado' ? (
-          <button onClick={() => onPay(rec)} title={`Adelantar ${nextMesCorto}`} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar {nextMesCorto}</button>
+          <button onClick={() => onPay(rec, true)} title={`Adelantar ${nextMesCorto}`} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar {nextMesCorto}</button>
         ) : (
           <button onClick={() => onPay(rec)} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar</button>
         )}

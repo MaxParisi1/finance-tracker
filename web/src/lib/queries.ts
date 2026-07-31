@@ -514,6 +514,7 @@ export interface FijoDelMes {
   fecha_pago?: string
   con_comprobante: boolean
   dias_para_vencimiento: number
+  siguiente_pagado: boolean // mensual: el mes siguiente ya tiene un pago mapeado (adelanto hecho)
 }
 
 export interface FijosDelMes {
@@ -617,6 +618,15 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
   }
 
   const keyMes = monthKey(anio, mes)
+  const nextMes = mes === 12 ? 1 : mes + 1
+  const nextAnio = mes === 12 ? anio + 1 : anio
+  const keyMesSig = monthKey(nextAnio, nextMes)
+  // ¿El mes siguiente ya tiene un pago mapeado? (adelanto ya hecho). Solo mensual.
+  const siguientePagado = (r: GastoRecurrente) => {
+    if (r.frecuencia !== 'mensual') return false
+    const dia = r.dia_del_mes ?? 1
+    return (pagosPorRec.get(r.id) ?? []).some(g => mesDelPagoMensual(g.fecha, dia) === keyMesSig)
+  }
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
   const diasHasta = (fecha: string) => Math.round((new Date(fecha + 'T00:00:00').getTime() - hoy.getTime()) / DAY)
 
@@ -670,6 +680,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
         fecha_pago: pago.fecha,
         con_comprobante: false,
         dias_para_vencimiento: dias,
+        siguiente_pagado: siguientePagado(r),
       }
       pagados.push(f)
       comprobantePend.push({ f, gasto_id: pago.gasto_id })
@@ -688,6 +699,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
         pagado: false,
         con_comprobante: false,
         dias_para_vencimiento: dias,
+        siguiente_pagado: false,
       })
     }
   }

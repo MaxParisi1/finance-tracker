@@ -9,7 +9,8 @@ import { formatARS, cn } from '@/lib/utils'
 import { materializarRecurrentesAction } from '@/app/recurrentes/actions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Plus, CheckCircle2, Paperclip, Pencil } from 'lucide-react'
+import { Plus, CheckCircle2, Paperclip, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
+import Link from 'next/link'
 
 const FRECUENCIA_LABEL: Record<string, string> = { mensual: 'Mensual', anual: 'Anual', semanal: 'Semanal' }
 
@@ -27,6 +28,7 @@ interface Props {
   mesLabel: string
   mes: number
   anio: number
+  esMesActual: boolean
 }
 
 function vencInfo(dias: number): { label: string; tone: 'crit' | 'warn' | 'muted' } {
@@ -47,7 +49,7 @@ const stripeTone: Record<string, string> = {
 
 export default function RecurrentesView({
   recurrentes, total_mensual_ars, total_anual_ars,
-  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio,
+  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio, esMesActual,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
   const [registrando, setRegistrando] = useState<{ rec: RecurrenteConCosto; fechaDefault?: string; mesLabel?: string } | null>(null)
@@ -68,6 +70,10 @@ export default function RecurrentesView({
   const abrirCobro = (rec: RecurrenteConCosto, adelanto?: boolean) =>
     setRegistrando(adelanto ? { rec, fechaDefault: fechaAdelanto, mesLabel: nextMesLabel } : { rec })
 
+  const prevMes = mes === 1 ? 12 : mes - 1
+  const prevAnio = mes === 1 ? anio - 1 : anio
+  const hrefMes = (m: number, a: number) => `/recurrentes?mes=${m}&anio=${a}`
+
   const porCategoria = new Map<string, number>()
   for (const r of recurrentes) porCategoria.set(r.categoria ?? 'Sin categoría', (porCategoria.get(r.categoria ?? 'Sin categoría') ?? 0) + r.mensual_ars)
   const categoriasSorted = Array.from(porCategoria.entries()).map(([cat, total]) => ({ cat, total })).sort((a, b) => b.total - a.total)
@@ -87,6 +93,22 @@ export default function RecurrentesView({
 
   return (
     <>
+      {/* Selector de mes */}
+      <div className="flex items-center gap-2 mb-4">
+        <Link href={hrefMes(prevMes, prevAnio)} aria-label="Mes anterior"
+          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors">
+          <ChevronLeft className="w-4 h-4" />
+        </Link>
+        <span className="text-sm font-semibold text-foreground capitalize min-w-[9rem] text-center">{mesLabel}</span>
+        <Link href={hrefMes(mes === 12 ? 1 : mes + 1, mes === 12 ? anio + 1 : anio)} aria-label="Mes siguiente"
+          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors">
+          <ChevronRight className="w-4 h-4" />
+        </Link>
+        {!esMesActual && (
+          <Link href="/recurrentes" className="ml-1 text-xs font-medium text-primary hover:underline">Hoy</Link>
+        )}
+      </div>
+
       {/* Estado de pagos del mes */}
       <Card className="mb-5">
         <CardContent className="p-6">
@@ -305,7 +327,11 @@ function FijoRow({ f, rec, variant, onEdit, onPay, nextMesCorto }: {
         {variant === 'pendiente' ? (
           <button onClick={() => onPay(rec)} className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 whitespace-nowrap">Pagar</button>
         ) : variant === 'pagado' ? (
-          <button onClick={() => onPay(rec, true)} title={`Adelantar ${nextMesCorto}`} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar {nextMesCorto}</button>
+          f?.siguiente_pagado ? (
+            <span title={`${nextMesCorto} ya adelantado`} className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-lg bg-success/12 text-success whitespace-nowrap">✓ {nextMesCorto}</span>
+          ) : (
+            <button onClick={() => onPay(rec, true)} title={`Adelantar ${nextMesCorto}`} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar {nextMesCorto}</button>
+          )
         ) : (
           <button onClick={() => onPay(rec)} className="text-xs font-medium px-3 py-2 rounded-lg border border-border text-muted-foreground hover:border-primary hover:text-primary whitespace-nowrap">Pagar</button>
         )}

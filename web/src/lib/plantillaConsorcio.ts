@@ -38,7 +38,10 @@ export function cuerpo(vencimiento: string, ahora = new Date()): string {
   return [
     `${saludo(ahora.getHours())},`,
     '',
-    'Les adjunto comprobante de pago correspondiente a las expensas del mes',
+    // Una sola línea: el salto que traía el mail original era el envoltorio
+    // automático de Thunderbird a ~72 caracteres (format=flowed), no un corte
+    // de párrafo. Reproducirlo como salto duro lo hacía ver mal al redactar.
+    'Les adjunto comprobante de pago correspondiente a las expensas del mes ' +
     `de ${mesDelPeriodo(vencimiento)} del Consorcio Gallo 1636/58.`,
     '',
     'Saludos cordiales,',

@@ -15,6 +15,7 @@ import {
   MoreHorizontal,
   CalendarClock,
   X,
+  ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +27,7 @@ const PRIMARY = [
 
 const MORE = [
   { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
+  { href: '/registro',     label: 'Registro',     icon: ClipboardCheck },
   { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
   { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
   { href: '/cuotas',       label: 'Cuotas',       icon: Layers },

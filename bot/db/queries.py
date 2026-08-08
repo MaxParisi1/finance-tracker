@@ -466,3 +466,198 @@ def actualizar_tarjeta(sufijo: str, campos: dict) -> dict:
         .execute()
     )
     return res.data[0] if res.data else {}
+
+
+# ──────────────────────────────────────────────
+# Servicios fijos y facturas
+# ──────────────────────────────────────────────
+
+def obtener_servicio_por_identificador(identificador: str) -> dict | None:
+    """
+    Resuelve un servicio a partir de un identificador YA NORMALIZADO
+    (número de cuenta, cliente, referente, CBU o CUIT).
+
+    Es el único camino de ruteo: nunca se matchea por nombre ni por dirección.
+    servicios_identificadores.valor es UNIQUE, así que no puede haber ambigüedad.
+    """
+    client = get_client()
+    res = (
+        client.table("servicios_identificadores")
+        .select("tipo, valor, servicios(*)")
+        .eq("valor", identificador)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return None
+
+    fila = res.data[0]
+    servicio = fila.get("servicios")
+    if not servicio or not servicio.get("activo"):
+        return None
+
+    return {**servicio, "identificador_tipo": fila["tipo"], "identificador": fila["valor"]}
+
+
+def obtener_factura_por_email(message_id: str) -> dict | None:
+    """Factura ya creada a partir de ese mail, si existe (idempotencia del poller)."""
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .select("*")
+        .eq("email_message_id", message_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def obtener_factura_por_vencimiento(servicio_id: str, vencimiento: str) -> dict | None:
+    """
+    Factura del servicio con ese vencimiento exacto. Sirve para resolver la
+    carrera contra el índice único (servicio_id, vencimiento) sin duplicar.
+    """
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .select("*")
+        .eq("servicio_id", servicio_id)
+        .eq("vencimiento", vencimiento)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def insertar_factura(factura: dict) -> dict:
+    client = get_client()
+    res = client.table("facturas").insert(factura).execute()
+    creada = res.data[0]
+    logger.info(
+        "Factura insertada id=%s servicio=%s $%s vence=%s",
+        creada.get("id"), factura.get("servicio_id"),
+        factura.get("monto"), factura.get("vencimiento"),
+    )
+    return creada
+
+
+def obtener_facturas_pendientes(servicio_id: str | None = None) -> list[dict]:
+    """Facturas impagas, de un servicio o de todos, más próximas a vencer primero."""
+    client = get_client()
+    q = client.table("facturas").select("*, servicios(slug, nombre)").eq("estado", "pendiente")
+    if servicio_id:
+        q = q.eq("servicio_id", servicio_id)
+    return q.order("vencimiento").execute().data
+
+
+def marcar_factura_pagada(factura_id: str, gasto_id: str, fecha_pago: str) -> dict:
+    """
+    Vincula el pago a la factura. Solo aplica sobre facturas pendientes: si otro
+    proceso ya la saldó, no se pisa y se devuelve {} (el caller decide).
+    """
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .update({"estado": "pagada", "gasto_id": gasto_id, "fecha_pago": fecha_pago})
+        .eq("id", factura_id)
+        .eq("estado", "pendiente")
+        .execute()
+    )
+    if not res.data:
+        logger.warning("Factura %s no se marcó pagada (¿ya estaba saldada?)", factura_id)
+        return {}
+    logger.info("Factura %s pagada con gasto %s", factura_id, gasto_id)
+    return res.data[0]
+
+
+def vincular_archivo_a_factura(archivo_id: str, factura_id: str) -> dict:
+    """Cuelga un PDF de la factura, exista o no todavía el gasto."""
+    client = get_client()
+    res = (
+        client.table("archivos_drive")
+        .update({"factura_id": factura_id})
+        .eq("id", archivo_id)
+        .execute()
+    )
+    return res.data[0] if res.data else {}
+
+
+def obtener_ultima_factura(servicio_id: str) -> dict | None:
+    """
+    Última factura del servicio por vencimiento, en cualquier estado.
+    Se usa como referencia de plausibilidad del monto: la anterior suele estar
+    pagada, así que filtrar por pendientes daría None casi siempre.
+    """
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .select("*")
+        .eq("servicio_id", servicio_id)
+        .neq("estado", "anulada")
+        .order("vencimiento", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def obtener_servicio_por_slug(slug: str) -> dict | None:
+    """
+    Resuelve un servicio por su slug. Es la vía para expensas, cuyo mail no trae
+    ningún número de cuenta: ahí el remitente es el identificador.
+    """
+    client = get_client()
+    res = (
+        client.table("servicios")
+        .select("*")
+        .eq("slug", slug)
+        .eq("activo", True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def listar_identificadores_servicios() -> list[dict]:
+    """
+    Todos los identificadores registrados, con su servicio.
+    Se traen enteros (son pocos) para poder buscarlos como substring dentro del
+    texto de un PDF, donde el número puede venir espaciado o embebido en una
+    línea de código de barras.
+    """
+    client = get_client()
+    res = (
+        client.table("servicios_identificadores")
+        .select("tipo, valor, servicios(*)")
+        .execute()
+    )
+    return [
+        {"tipo": f["tipo"], "valor": f["valor"], "servicio": f["servicios"]}
+        for f in res.data
+        if f.get("servicios") and f["servicios"].get("activo")
+    ]
+
+
+def obtener_recurrente_por_id(recurrente_id: str) -> dict | None:
+    client = get_client()
+    res = client.table("gastos_recurrentes").select("*").eq("id", recurrente_id).limit(1).execute()
+    return res.data[0] if res.data else None
+
+
+def obtener_facturas_con_archivos(desde: str) -> list[dict]:
+    """
+    Facturas desde una fecha, con su servicio y los tipos de archivo adjuntos.
+
+    Se trae todo junto para poder decidir en memoria qué falta (factura, pago o
+    comprobante) sin una consulta por fila.
+    """
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .select("*, servicios(slug, nombre), archivos_drive(tipo)")
+        .neq("estado", "anulada")
+        .gte("vencimiento", desde)
+        .order("vencimiento")
+        .execute()
+    )
+    return res.data

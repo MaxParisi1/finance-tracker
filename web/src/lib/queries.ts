@@ -993,3 +993,112 @@ export async function contarArchivosPorGastos(gastoIds: string[]): Promise<Recor
   }
   return counts
 }
+
+// ──────────────────────────────────────────────
+// Registro de facturas (grilla de auditoría)
+// ──────────────────────────────────────────────
+
+export interface CeldaRegistro {
+  factura_id: string
+  monto: number
+  vencimiento: string
+  estado: 'pendiente' | 'pagada' | 'anulada'
+  con_factura: boolean
+  con_comprobante: boolean
+  link_factura: string | null
+  link_comprobante: string | null
+}
+
+export interface FilaRegistro {
+  servicio_id: string
+  slug: string
+  nombre: string
+  celdas: Record<string, CeldaRegistro>   // key: 'YYYY-MM' del vencimiento
+  completas: number
+  esperadas: number
+}
+
+export interface Registro {
+  anio: number
+  meses: string[]
+  filas: FilaRegistro[]
+  total_celdas: number
+  celdas_completas: number
+  pct_completo: number
+}
+
+/**
+ * Grilla servicios × meses para verificar que el archivo esté completo.
+ *
+ * Una celda está completa cuando la factura está pagada Y tiene los dos PDFs
+ * (factura y comprobante). Eso es lo que hace verificable el "registro total":
+ * no alcanza con que la contabilidad cierre, tiene que estar el respaldo.
+ */
+export async function getRegistro(anio: number): Promise<Registro> {
+  const supabase = getSupabaseServer()
+
+  const [{ data: servicios }, { data: facturas }] = await Promise.all([
+    supabase.from('servicios').select('id, slug, nombre').eq('activo', true).order('nombre'),
+    supabase
+      .from('facturas')
+      .select('id, servicio_id, monto, vencimiento, estado, archivos_drive(tipo, drive_web_view_link)')
+      .neq('estado', 'anulada')
+      .gte('vencimiento', `${anio}-01-01`)
+      .lte('vencimiento', `${anio}-12-31`),
+  ])
+
+  const meses = Array.from({ length: 12 }, (_, i) => `${anio}-${pad2(i + 1)}`)
+  const hoy = new Date()
+  const mesActual = `${hoy.getFullYear()}-${pad2(hoy.getMonth() + 1)}`
+
+  const filas: FilaRegistro[] = (servicios ?? []).map(s => {
+    const celdas: Record<string, CeldaRegistro> = {}
+
+    for (const f of facturas ?? []) {
+      if (f.servicio_id !== s.id) continue
+      const key = String(f.vencimiento).slice(0, 7)
+      const archivos = (f.archivos_drive ?? []) as { tipo: string; drive_web_view_link: string | null }[]
+      const factura = archivos.find(a => a.tipo === 'factura')
+      const comprobante = archivos.find(a => a.tipo === 'comprobante')
+
+      celdas[key] = {
+        factura_id: f.id,
+        monto: Number(f.monto ?? 0),
+        vencimiento: String(f.vencimiento),
+        estado: f.estado,
+        con_factura: Boolean(factura),
+        con_comprobante: Boolean(comprobante),
+        link_factura: factura?.drive_web_view_link ?? null,
+        link_comprobante: comprobante?.drive_web_view_link ?? null,
+      }
+    }
+
+    // Solo se cuentan como "esperadas" las celdas que ya existen: no sabemos de
+    // antemano si un servicio factura todos los meses (AySA puede ser bimestral).
+    const existentes = Object.values(celdas)
+    const completas = existentes.filter(
+      c => c.estado === 'pagada' && c.con_factura && c.con_comprobante,
+    ).length
+
+    return {
+      servicio_id: s.id,
+      slug: s.slug,
+      nombre: s.nombre,
+      celdas,
+      completas,
+      esperadas: existentes.length,
+    }
+  })
+
+  const total_celdas = filas.reduce((n, f) => n + f.esperadas, 0)
+  const celdas_completas = filas.reduce((n, f) => n + f.completas, 0)
+
+  return {
+    anio,
+    meses: meses.filter(m => anio < hoy.getFullYear() || m <= mesActual),
+    filas,
+    total_celdas,
+    celdas_completas,
+    pct_completo: total_celdas ? Math.round((celdas_completas / total_celdas) * 100) : 0,
+  }
+}

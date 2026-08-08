@@ -14,6 +14,7 @@ from google.genai import types
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
 from bot.gemini_client import generate_with_fallback
 from bot.tools.gastos import guardar_gasto, historial_comercio
+from bot.tools.montos import parse_monto_ar
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
 from bot.db.queries import obtener_categorias_activas, existe_gasto_con_email
 from bot.tools import recurrentes_matcher as matcher
@@ -49,8 +50,8 @@ def _is_prisma_denied(body: str) -> bool:
 
 
 def _parse_monto_argentino(raw: str) -> float:
-    """Convierte '14.500,00' → 14500.0"""
-    return float(raw.replace(".", "").replace(",", "."))
+    """Convierte '14.500,00' → 14500.0. Delega en el parser compartido."""
+    return parse_monto_ar(raw)
 
 
 def _parse_prisma_email(email: dict) -> dict | None:
@@ -418,11 +419,16 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
 
 
 async def start_gmail_polling(bot, chat_id: int) -> None:
-    """Arranca los dos loops de polling en paralelo."""
+    """Arranca los loops de polling en paralelo."""
+    from bot.facturas_poller import LABEL_NAME_FACTURAS, poll_facturas_once
+    from bot.tools.recordatorios import loop_recordatorios
+
     logger.info("Gmail pollers iniciados (intervalo: %ds)", POLL_INTERVAL)
     await asyncio.gather(
         _loop_poll(bot, chat_id, poll_gmail_once, "Consumos"),
         _loop_poll(bot, chat_id, poll_visa_once, "Consumos_visa"),
+        _loop_poll(bot, chat_id, poll_facturas_once, LABEL_NAME_FACTURAS),
+        loop_recordatorios(bot, chat_id),
     )
 
 

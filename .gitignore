@@ -31,3 +31,8 @@ web/out/
 # Gmail OAuth (NUNCA commitear)
 bot/credentials.json
 bot/token.json
+
+# Documentos personales usados como material de referencia (NO commitear)
+emails/
+facturas/
+comprobantes/

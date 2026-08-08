@@ -17,6 +17,7 @@ import {
   History,
   Plus,
   CalendarClock,
+  ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
   { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
   { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
+  { href: '/registro',     label: 'Registro',     icon: ClipboardCheck },
   { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
   { href: '/historico',    label: 'Histórico',    icon: History },
 ]

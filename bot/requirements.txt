@@ -10,3 +10,6 @@ google-api-python-client>=2.122.0
 google-auth>=2.29.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
+# Descarga de los PDFs de expensas. Ya venía como dependencia transitiva de
+# google-api-python-client; se declara explícito porque lo usamos directo.
+requests>=2.32.0

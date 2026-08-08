@@ -59,15 +59,30 @@ def get_unread_bank_emails(label_name: str = LABEL_NAME) -> list[dict]:
             userId="me", id=msg_ref["id"], format="full"
         ).execute()
 
-        headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
-        body = _extract_body(msg["payload"])
+        # Si vino reenviado como adjunto, se trabaja sobre el mensaje original.
+        payload = desanidar_reenvio(msg["payload"])
+        externos = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])} or externos
+        body = _extract_body(payload)
 
         emails.append({
             "id": msg["id"],
-            "from": headers.get("From", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
+            "from": headers.get("From", "") or externos.get("From", ""),
+            "subject": headers.get("Subject", "") or externos.get("Subject", ""),
+            "date": headers.get("Date", "") or externos.get("Date", ""),
             "body": body,
+            # HTML crudo: los mails de expensas traen los links a los PDFs en
+            # atributos href que se pierden al convertir a texto.
+            "html": _find_part(payload, "text/html"),
+            # Cabeceras del mensaje y del sobre externo: con reenvío el emisor
+            # real puede quedar solo en una de ellas.
+            "remitentes_alternativos": [
+                v for v in (
+                    {**externos, **headers}.get(h, "")
+                    for h in ("Reply-To", "X-Forwarded-For", "X-Original-From",
+                              "Return-Path", "Sender", "X-Original-Sender", "From")
+                ) if v
+            ],
         })
 
     return emails
@@ -82,6 +97,24 @@ def mark_as_read(message_id: str) -> None:
         id=message_id,
         body={"removeLabelIds": ["UNREAD"]},
     ).execute()
+
+
+def desanidar_reenvio(payload: dict) -> dict:
+    """
+    Si el mensaje es un reenvío "como adjunto", devuelve el payload del mensaje
+    ORIGINAL embebido; si no, devuelve el mismo payload.
+
+    Outlook ofrece tres modos de reenvío y solo "Redirigir" preserva el From:.
+    "Reenviar como adjunto" mete el mail entero en una parte message/rfc822, y
+    sin desanidarlo no se vería ni el remitente ni el cuerpo real.
+    """
+    for parte in payload.get("parts", []):
+        if parte.get("mimeType") == "message/rfc822":
+            # El original puede venir envuelto en otra capa de parts.
+            interno = parte.get("parts") or []
+            candidato = interno[0] if len(interno) == 1 and not parte.get("headers") else parte
+            return desanidar_reenvio(candidato)
+    return payload
 
 
 def _extract_body(payload: dict) -> str:

@@ -89,7 +89,7 @@ GASTO_USD_MOCK = {**GASTO_INSERTAR_MOCK, "moneda": "USD", "monto_original": 100.
 @patch("bot.tools.gastos.convertir_usd_a_ars", return_value={
     "monto_ars": 120000.0,
     "tipo_cambio": 1200.0,
-    "tipo_cambio_tipo": "blue",
+    "tipo_cambio_tipo": "oficial",
 })
 def test_guardar_gasto_usd(mock_conversion, mock_insert):
     from bot.tools.gastos import guardar_gasto
@@ -102,11 +102,11 @@ def test_guardar_gasto_usd(mock_conversion, mock_insert):
         medio_pago="credito_usd",
     )
 
-    mock_conversion.assert_called_once_with(100.0, "blue")
+    mock_conversion.assert_called_once_with(100.0, "oficial")
     call_args = mock_insert.call_args[0][0]
     assert call_args["monto_ars"] == 120000.0
     assert call_args["tipo_cambio"] == 1200.0
-    assert call_args["tipo_cambio_tipo"] == "blue"
+    assert call_args["tipo_cambio_tipo"] == "oficial"
 
 
 # ──────────────────────────────────────────────

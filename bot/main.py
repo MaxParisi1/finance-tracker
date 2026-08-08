@@ -19,20 +19,11 @@ from telegram.ext import (
     filters,
 )
 
-from bot.agent import run_agent, set_pdf_pendiente
+from bot.agent import run_agent
 from bot.gmail_poller import start_gmail_polling
 from bot.tools import recurrentes_matcher as matcher
-from bot.tools.media_processor import (
-    procesar_imagen_ticket,
-    procesar_audio,
-    analizar_comprobante,
-    ticket_a_mensaje,
-    audio_a_mensaje,
-    comprobante_a_mensaje,
-)
-from bot.tools.comprobantes import set_archivo_pendiente, preview_filename
-from bot.tools.bbva_parser import importar_pdf_bbva
-from bot.db.queries import obtener_gastos, cargar_historial_bot, guardar_historial_bot
+from bot.tools.media_processor import procesar_audio, audio_a_mensaje
+from bot.db.queries import cargar_historial_bot, guardar_historial_bot
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -99,7 +90,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "• \"Gasté 15000 pesos en el super con débito\"\n"
         "• \"¿Cuánto gasté en restós este mes?\"\n"
         "• \"¿Cuánto está el dólar blue?\"\n\n"
-        "También podés mandarme fotos de tickets o notas de voz."
+        "También podés mandarme notas de voz, o el PDF de una factura o comprobante\n"
+        "de tus servicios fijos y lo archivo solo."
     )
 
 
@@ -113,9 +105,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/reset — Limpiar historial de conversación\n\n"
         "*Podés enviarme:*\n"
         "• Texto libre describiendo un gasto\n"
-        "• Foto de un ticket o factura\n"
         "• Nota de voz\n"
-        "• PDF de resumen BBVA",
+        "• PDF de factura o comprobante de un servicio fijo",
         parse_mode="Markdown",
     )
 
@@ -148,81 +139,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         response = "Uy, algo salió mal. Intentá de nuevo en un momento."
 
     _add_to_history(chat_id, "user", user_text)
-    _add_to_history(chat_id, "model", response)
-
-    await safe_reply(update.message, response)
-
-
-def _is_comprobante_request(caption: str | None) -> bool:
-    """Detecta si el caption indica que el usuario quiere subir a Drive."""
-    if not caption:
-        return False
-    keywords = [
-        "drive", "comprobante", "factura", "guardá", "guarda",
-        "subí", "subi", "organiz", "archiv",
-    ]
-    lower = caption.lower()
-    return any(kw in lower for kw in keywords)
-
-
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa fotos de tickets/comprobantes con Gemini Vision."""
-    if not _is_authorized(update):
-        return
-
-    chat_id = update.effective_chat.id
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-    # Descargar la foto en máxima resolución
-    photo = update.message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
-    img_bytes = await file.download_as_bytearray()
-    caption = update.message.caption or ""
-
-    # Decidir flujo: si el caption pide Drive, o si parece factura/comprobante
-    is_drive_request = _is_comprobante_request(caption)
-
-    try:
-        if is_drive_request:
-            # Flujo comprobante → analizar para Drive
-            datos = analizar_comprobante(bytes(img_bytes), mime_type="image/jpeg")
-            set_archivo_pendiente(chat_id, bytes(img_bytes), "image/jpeg", datos)
-            mensaje_interno = comprobante_a_mensaje(datos)
-            mensaje_interno += f"\n- Nombre de archivo sugerido: `{preview_filename(datos, 'image/jpeg')}` (el usuario puede cambiarlo antes de confirmar)."
-            if caption:
-                mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
-        else:
-            # Flujo ticket/gasto normal
-            datos = procesar_imagen_ticket(bytes(img_bytes))
-            # Siempre almacenar por si el usuario quiere subirlo después
-            datos_comprobante = {
-                "tipo": datos.get("tipo", "ticket"),
-                "comercio": datos.get("comercio"),
-                "fecha": datos.get("fecha"),
-                "monto": datos.get("monto_total"),
-                "moneda": datos.get("moneda", "ARS"),
-                "categoria_sugerida": "Otros",
-            }
-            set_archivo_pendiente(chat_id, bytes(img_bytes), "image/jpeg", datos_comprobante)
-            mensaje_interno = ticket_a_mensaje(datos)
-            mensaje_interno += (
-                "\n\nAdemás, el archivo está disponible para subir a Google Drive si el usuario lo pide."
-            )
-            if caption:
-                mensaje_interno += f"\nEl usuario también dijo: \"{caption}\""
-    except Exception:
-        logger.exception("Error procesando imagen")
-        await update.message.reply_text("No pude procesar la imagen. Intentá de nuevo o describí el gasto en texto.")
-        return
-
-    history = _get_history(chat_id)
-    try:
-        response = run_agent(mensaje_interno, history, chat_id=chat_id)
-    except Exception:
-        logger.exception("Error en el agente (foto)")
-        response = "Uy, algo salió mal procesando la foto."
-
-    _add_to_history(chat_id, "user", f"[foto]{f' {caption}' if caption else ''}")
     _add_to_history(chat_id, "model", response)
 
     await safe_reply(update.message, response)
@@ -264,35 +180,92 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await safe_reply(update.message, response)
 
 
-def _is_bbva_pdf(filename: str | None, caption: str | None) -> bool:
-    """Heurística para detectar si un PDF es un resumen BBVA."""
-    if caption:
-        lower = caption.lower()
-        if "bbva" in lower or "resumen" in lower:
-            return True
-    if filename:
-        lower = filename.lower()
-        if "bbva" in lower or "resumen" in lower:
-            return True
-    return False
+async def _archivar_documento_servicio(
+    update: Update, file_bytes: bytes, mime_type: str
+) -> None:
+    """
+    Identifica el documento por el número de cuenta que lleva adentro, lo
+    concilia contra la factura abierta y lo archiva en Drive.
+
+    Todo determinístico: si no reconoce el documento no adivina ni escala a un
+    modelo, avisa y no hace nada.
+    """
+    import asyncio
+
+    from bot.tools.archivado import archivar_documento
+    from bot.tools.conciliacion import ConciliacionAmbigua
+    from bot.tools.documentos import DocumentoNoIdentificado, identificar_documento
+    from bot.tools.montos import formatear_monto_ar
+
+    try:
+        doc_ident = await asyncio.to_thread(identificar_documento, file_bytes)
+    except DocumentoNoIdentificado as e:
+        await update.message.reply_text(
+            f"No reconocí este documento: {e}\n\n"
+            f"Solo proceso facturas y comprobantes de tus servicios fijos "
+            f"(los identifico por el número de cuenta que traen adentro).",
+        )
+        return
+    except Exception:
+        logger.exception("Error identificando el documento")
+        await update.message.reply_text("No pude leer el archivo. Probá de nuevo.")
+        return
+
+    try:
+        resultado = await asyncio.to_thread(
+            archivar_documento, doc_ident, file_bytes, mime_type
+        )
+    except ConciliacionAmbigua as e:
+        await update.message.reply_text(
+            f"Es un documento de *{doc_ident.servicio['nombre']}*, pero no supe a qué "
+            f"factura corresponde: {e}\nNo archivé nada.",
+            parse_mode="Markdown",
+        )
+        return
+    except Exception:
+        logger.exception("Error archivando documento de servicio fijo")
+        await update.message.reply_text(
+            "Reconocí el documento pero falló el archivado. No quedó guardado; probá de nuevo."
+        )
+        return
+
+    lineas = [
+        f"📎 *{resultado.tipo.capitalize()} archivada*" if resultado.tipo == "factura"
+        else "📎 *Comprobante archivado*",
+        f"• *{resultado.servicio}*",
+    ]
+    if resultado.factura:
+        lineas.append(f"• ${formatear_monto_ar(float(resultado.factura['monto']))}")
+        lineas.append(f"• Vence: {resultado.factura['vencimiento']}")
+    if resultado.gasto:
+        lineas.append("• Gasto registrado y factura saldada ✅")
+    lineas.append(f"• Drive: {resultado.archivo.get('drive_folder_path', '')}")
+    if resultado.aviso:
+        lineas.append(f"⚠️ {resultado.aviso}")
+
+    await update.message.reply_text("\n".join(lineas), parse_mode="Markdown")
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa PDFs: resúmenes BBVA o comprobantes/facturas para Drive."""
+    """
+    Procesa documentos de los servicios fijos, de forma 100% determinística.
+
+    Un PDF se identifica por el número de cuenta que lleva adentro, se concilia
+    contra la factura abierta y se archiva en Drive. Sin LLM y sin preguntas.
+    Lo que no se reconoce se rechaza con un mensaje claro: preferimos no hacer
+    nada antes que archivar algo en el lugar equivocado.
+    """
     if not _is_authorized(update):
         return
 
     doc = update.message.document
     chat_id = update.effective_chat.id
-    caption = update.message.caption or ""
     mime_type = doc.mime_type or ""
 
-    # Aceptar PDFs e imágenes como documentos
-    accepted_types = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
-    if mime_type not in accepted_types:
+    aceptados = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+    if mime_type not in aceptados:
         await update.message.reply_text(
-            "Puedo procesar PDFs e imágenes (facturas, comprobantes, resúmenes BBVA). "
-            "Para otros archivos, describí el gasto en texto."
+            "Puedo procesar PDFs e imágenes de facturas y comprobantes de tus servicios fijos."
         )
         return
 
@@ -301,76 +274,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     file = await context.bot.get_file(doc.file_id)
     file_bytes = await file.download_as_bytearray()
 
-    # Decidir flujo: BBVA o comprobante general
-    is_bbva = mime_type == "application/pdf" and _is_bbva_pdf(doc.file_name, caption)
-    is_drive_request = _is_comprobante_request(caption)
-
-    if is_bbva and not is_drive_request:
-        # ── Flujo BBVA (existente) ──
-        await update.message.reply_text("Recibí el PDF, lo estoy procesando... un momento.")
-
-        try:
-            from datetime import date, timedelta
-            fecha_desde = (date.today() - timedelta(days=90)).isoformat()
-            gastos_existentes = obtener_gastos({"fecha_desde": fecha_desde})
-            resultado = importar_pdf_bbva(bytes(file_bytes), gastos_existentes)
-            set_pdf_pendiente(chat_id, resultado, bytes(file_bytes))
-        except Exception:
-            logger.exception("Error procesando PDF BBVA")
-            await update.message.reply_text("No pude procesar el PDF. ¿Es un resumen BBVA? Intentá de nuevo.")
-            return
-
-        nuevos = resultado["total_nuevos"]
-        duplicados = resultado["total_duplicados"]
-        fecha_desde_pdf = resultado.get("fecha_desde") or "?"
-        fecha_hasta_pdf = resultado.get("fecha_hasta") or "?"
-        metodo = resultado.get("metodo_usado", "texto")
-
-        muestra = resultado["movimientos_nuevos"][:5]
-        muestra_txt = "\n".join(
-            f"  • {m.get('fecha', '?')} | {m.get('descripcion', '?')} | ${m.get('monto', 0):,.2f} {m.get('moneda', 'ARS')}"
-            for m in muestra
-        )
-
-        mensaje_interno = (
-            f"El usuario mandó un PDF de resumen BBVA. Ya fue procesado (método: {metodo}).\n"
-            f"Encontré {nuevos + duplicados} movimientos entre {fecha_desde_pdf} y {fecha_hasta_pdf}.\n"
-            f"Nuevos para importar: {nuevos}. Duplicados detectados (se omitirán): {duplicados}.\n\n"
-            f"Primeros movimientos nuevos:\n{muestra_txt}\n\n"
-            f"Mostrá este resumen al usuario y pedí confirmación explícita para importar. "
-            f"Si confirma, llamá a confirmar_importacion_pdf_bbva."
-        )
-        history_label = "[PDF resumen BBVA]"
-
-    else:
-        # ── Flujo comprobante/factura para Drive ──
-        await update.message.reply_text("Recibí el archivo, analizándolo... un momento.")
-
-        try:
-            datos = analizar_comprobante(bytes(file_bytes), mime_type=mime_type)
-            set_archivo_pendiente(chat_id, bytes(file_bytes), mime_type, datos)
-            mensaje_interno = comprobante_a_mensaje(datos)
-            mensaje_interno += f"\n- Nombre de archivo sugerido: `{preview_filename(datos, mime_type)}` (el usuario puede cambiarlo antes de confirmar)."
-            if caption:
-                mensaje_interno += f"\n\nEl usuario también dijo: \"{caption}\""
-        except Exception:
-            logger.exception("Error analizando comprobante")
-            await update.message.reply_text("No pude analizar el archivo. Intentá de nuevo.")
-            return
-
-        history_label = f"[documento: {doc.file_name or 'archivo'}]"
-
-    history = _get_history(chat_id)
-    try:
-        response = run_agent(mensaje_interno, history, chat_id=chat_id)
-    except Exception:
-        logger.exception("Error en el agente (documento)")
-        response = "Uy, algo salió mal procesando el archivo."
-
-    _add_to_history(chat_id, "user", history_label)
-    _add_to_history(chat_id, "model", response)
-
-    await safe_reply(update.message, response)
+    await _archivar_documento_servicio(update, bytes(file_bytes), mime_type)
 
 
 # ──────────────────────────────────────────────
@@ -403,7 +307,6 @@ async def _run() -> None:
     app.add_handler(CommandHandler("reset", reset_handler))
     app.add_handler(CallbackQueryHandler(match_callback_handler, pattern=r"^mr:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
 

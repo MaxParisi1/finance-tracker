@@ -1,8 +1,10 @@
 'use client'
 
-import Link from 'next/link'
-import { FileText, Receipt, CircleDashed, Clock } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { FileText, Receipt, CircleDashed, Clock, Mail, MailCheck } from 'lucide-react'
+import { toast } from 'sonner'
 import type { Registro, CeldaRegistro } from '@/lib/queries'
+import { crearBorradorConsorcioAction } from '@/app/registro/actions'
 import { cn } from '@/lib/utils'
 
 const MESES_CORTOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -13,7 +15,7 @@ function fmt(n: number) {
 }
 
 /** Una celda: dos puntitos (factura / comprobante) sobre el estado de pago. */
-function Celda({ celda }: { celda: CeldaRegistro | undefined }) {
+function Celda({ celda, esConsorcio }: { celda: CeldaRegistro | undefined; esConsorcio: boolean }) {
   if (!celda) {
     return (
       <td className="px-2 py-2 text-center">
@@ -64,8 +66,52 @@ function Celda({ celda }: { celda: CeldaRegistro | undefined }) {
         {celda.estado !== 'pagada' && (
           <Clock className="w-3 h-3 text-warning ml-0.5" aria-label="impaga" />
         )}
+        {esConsorcio && celda.con_comprobante && (
+          <BotonBorrador celda={celda} />
+        )}
       </div>
     </td>
+  )
+}
+
+/**
+ * Genera el borrador del mail al consorcio con el comprobante adjunto.
+ * Solo crea el borrador — el envío lo hacés vos desde Thunderbird.
+ */
+function BotonBorrador({ celda }: { celda: CeldaRegistro }) {
+  const [isPending, startTransition] = useTransition()
+  const [hecho, setHecho] = useState(celda.borrador_consorcio)
+
+  const Icono = hecho ? MailCheck : Mail
+
+  return (
+    <button
+      type="button"
+      disabled={isPending}
+      title={hecho
+        ? 'Borrador ya generado — hacé click para generar otro'
+        : 'Generar el borrador al consorcio con el comprobante adjunto'}
+      onClick={e => {
+        e.stopPropagation()
+        startTransition(async () => {
+          try {
+            const { carpeta } = await crearBorradorConsorcioAction(celda.factura_id)
+            setHecho(true)
+            toast.success(`Borrador creado en "${carpeta}". Abrilo en Thunderbird y enviá.`)
+          } catch (err: any) {
+            toast.error(err?.message ?? 'No pude crear el borrador')
+          }
+        })
+      }}
+      className={cn(
+        'ml-0.5 inline-flex items-center justify-center w-4 h-4 rounded-[3px] transition-colors',
+        hecho ? 'text-success hover:text-primary' : 'text-muted-foreground/50 hover:text-primary',
+        isPending && 'animate-pulse',
+      )}
+      aria-label="Generar borrador al consorcio"
+    >
+      <Icono className="w-3.5 h-3.5" />
+    </button>
   )
 }
 
@@ -122,7 +168,9 @@ export default function RegistroView({ registro }: { registro: Registro }) {
                     {fila.completas}/{fila.esperadas}
                   </span>
                 </td>
-                {meses.map(m => <Celda key={m} celda={fila.celdas[m]} />)}
+                {meses.map(m => (
+                  <Celda key={m} celda={fila.celdas[m]} esConsorcio={fila.slug === 'consorcio_gallo'} />
+                ))}
               </tr>
             ))}
           </tbody>
@@ -148,6 +196,9 @@ export default function RegistroView({ registro }: { registro: Registro }) {
         </span>
         <span className="flex items-center gap-1.5">
           <CircleDashed className="w-3.5 h-3.5" /> sin factura ese mes
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Mail className="w-3.5 h-3.5" /> borrador al consorcio (solo expensas)
         </span>
         <span className="text-muted-foreground/70">Los íconos en verde abren el PDF en Drive.</span>
       </div>

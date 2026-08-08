@@ -1000,6 +1000,7 @@ export async function contarArchivosPorGastos(gastoIds: string[]): Promise<Recor
 
 export interface CeldaRegistro {
   factura_id: string
+  borrador_consorcio: boolean
   monto: number
   vencimiento: string
   estado: 'pendiente' | 'pagada' | 'anulada'
@@ -1041,7 +1042,7 @@ export async function getRegistro(anio: number): Promise<Registro> {
     supabase.from('servicios').select('id, slug, nombre').eq('activo', true).order('nombre'),
     supabase
       .from('facturas')
-      .select('id, servicio_id, monto, vencimiento, estado, archivos_drive(tipo, drive_web_view_link)')
+      .select('id, servicio_id, monto, vencimiento, estado, borrador_consorcio_at, archivos_drive(tipo, drive_web_view_link)')
       .neq('estado', 'anulada')
       .gte('vencimiento', `${anio}-01-01`)
       .lte('vencimiento', `${anio}-12-31`),
@@ -1063,6 +1064,7 @@ export async function getRegistro(anio: number): Promise<Registro> {
 
       celdas[key] = {
         factura_id: f.id,
+        borrador_consorcio: Boolean(f.borrador_consorcio_at),
         monto: Number(f.monto ?? 0),
         vencimiento: String(f.vencimiento),
         estado: f.estado,

@@ -89,6 +89,15 @@ ALTER TABLE archivos_drive
 CREATE INDEX IF NOT EXISTS idx_archivos_factura ON archivos_drive (factura_id);
 
 -- ------------------------------------------------------------
+-- RLS: mismo criterio que la 010 — activo y sin policies, así que solo
+-- service_role (server-side) puede leer y escribir. Sin esto, el ALTER DEFAULT
+-- PRIVILEGES de la 009 dejaría estas tablas abiertas vía PostgREST.
+-- ------------------------------------------------------------
+ALTER TABLE servicios                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE servicios_identificadores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE facturas                  ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------
 -- SEED de servicios
 --
 -- El vínculo con gastos_recurrentes se resuelve UNA VEZ acá por nombre (es un

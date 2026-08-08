@@ -150,3 +150,13 @@ export async function subirArchivoDrive(params: {
     driveFolderPath: folderPath,
   }
 }
+
+/** Baja el contenido de un archivo de Drive por su ID. */
+export async function descargarArchivoDrive(driveFileId: string): Promise<Buffer> {
+  const drive = buildDriveClient()
+  const res = await drive.files.get(
+    { fileId: driveFileId, alt: 'media' },
+    { responseType: 'arraybuffer' },
+  )
+  return Buffer.from(res.data as ArrayBuffer)
+}

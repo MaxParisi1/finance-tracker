@@ -28,18 +28,17 @@ export const env = {
   DASHBOARD_PASSWORD: process.env.DASHBOARD_PASSWORD,
 
   // Borrador de expensas al consorcio. Opcionales a propósito: si faltan, el
-  // botón queda deshabilitado con un mensaje, pero el resto del sitio anda.
-  // Una integración sin configurar no puede tirar abajo la app entera.
+  // botón avisa y el resto del sitio anda. Una integración sin configurar no
+  // puede tirar abajo la app entera.
+  //
+  // Solo direcciones, ningún secreto: el .eml se descarga y lo enviás vos, así
+  // que no hace falta ninguna credencial de correo.
   OUTLOOK_EMAIL: process.env.OUTLOOK_EMAIL,
-  OUTLOOK_APP_PASSWORD: process.env.OUTLOOK_APP_PASSWORD,
-  OUTLOOK_IMAP_HOST: process.env.OUTLOOK_IMAP_HOST ?? 'outlook.office365.com',
   CONSORCIO_EMAIL: process.env.CONSORCIO_EMAIL,
   CONSORCIO_BCC: process.env.CONSORCIO_BCC,
 } as const
 
-/** True si están todas las variables para poder generar el borrador. */
+/** True si están las variables para poder generar el borrador. */
 export function borradorConsorcioConfigurado(): boolean {
-  return Boolean(
-    env.OUTLOOK_EMAIL && env.OUTLOOK_APP_PASSWORD && env.CONSORCIO_EMAIL,
-  )
+  return Boolean(env.OUTLOOK_EMAIL && env.CONSORCIO_EMAIL)
 }

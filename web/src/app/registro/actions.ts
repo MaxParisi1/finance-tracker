@@ -3,41 +3,44 @@
 import { revalidatePath } from 'next/cache'
 
 import { descargarArchivoDrive } from '@/lib/drive'
-import { borradorConsorcioConfigurado, env } from '@/lib/env'
-import { crearBorrador } from '@/lib/outlook'
-import { ASUNTO, cuerpo } from '@/lib/plantillaConsorcio'
+import { env } from '@/lib/env'
+import { construirEml } from '@/lib/mime'
+import { ASUNTO, cuerpo, mesDelPeriodo } from '@/lib/plantillaConsorcio'
 import { getSupabaseServer } from '@/lib/supabase'
 
 export type ResultadoBorrador =
-  | { ok: true; carpeta: string }
+  | { ok: true; nombreArchivo: string; emlBase64: string }
   | { ok: false; error: string }
 
 /**
- * Deja en Borradores de Outlook el mail al consorcio con el comprobante del mes.
+ * Arma el mail al consorcio con el comprobante del mes y lo devuelve como .eml
+ * para descargar.
  *
- * No envía nada: el usuario lo revisa y lo manda desde su cliente. Por eso se
- * registra `borrador_consorcio_at` como "generado", no como "enviado".
+ * No envía ni deja el borrador en ningún servidor: Microsoft ya no acepta
+ * autenticación básica por IMAP en cuentas personales, así que el archivo se
+ * baja y se abre en Thunderbird (doble click → Editar como nuevo). El efecto
+ * lateral bueno es que el sistema no necesita credenciales de correo y, por
+ * construcción, no puede mandarle un mail al consorcio por su cuenta.
  *
  * Devuelve el error en vez de lanzarlo: Next oculta los mensajes de excepción
- * en producción ("digest property..."), lo que deja al usuario sin saber qué
- * pasó. Devolviéndolo, el detalle llega al toast.
+ * en producción, lo que dejaría al usuario sin diagnóstico.
  */
 export async function crearBorradorConsorcioAction(
   facturaId: string,
 ): Promise<ResultadoBorrador> {
   try {
-    return { ok: true, ...(await generarBorrador(facturaId)) }
+    return { ok: true, ...(await generarEml(facturaId)) }
   } catch (e: any) {
     console.error('[borrador-consorcio] falló', e)
     return { ok: false, error: e?.message ?? 'Error desconocido' }
   }
 }
 
-async function generarBorrador(facturaId: string): Promise<{ carpeta: string }> {
-  if (!borradorConsorcioConfigurado()) {
-    throw new Error(
-      'Falta configurar OUTLOOK_EMAIL, OUTLOOK_APP_PASSWORD y CONSORCIO_EMAIL',
-    )
+async function generarEml(
+  facturaId: string,
+): Promise<{ nombreArchivo: string; emlBase64: string }> {
+  if (!env.OUTLOOK_EMAIL || !env.CONSORCIO_EMAIL) {
+    throw new Error('Faltan OUTLOOK_EMAIL y CONSORCIO_EMAIL en las variables de entorno')
   }
 
   const supabase = getSupabaseServer()
@@ -58,13 +61,15 @@ async function generarBorrador(facturaId: string): Promise<{ carpeta: string }> 
     throw new Error('Todavía no hay comprobante archivado para ese mes')
   }
 
+  const vencimiento = String(factura.vencimiento)
   const content = await descargarArchivoDrive(comprobante.drive_file_id)
 
-  const { carpeta } = await crearBorrador({
-    para: env.CONSORCIO_EMAIL!,
+  const eml = await construirEml({
+    de: env.OUTLOOK_EMAIL,
+    para: env.CONSORCIO_EMAIL,
     bcc: env.CONSORCIO_BCC,
     asunto: ASUNTO,
-    cuerpo: cuerpo(String(factura.vencimiento)),
+    cuerpo: cuerpo(vencimiento),
     adjuntos: [{
       filename: comprobante.drive_file_name,
       content,
@@ -78,5 +83,9 @@ async function generarBorrador(facturaId: string): Promise<{ carpeta: string }> 
     .eq('id', facturaId)
 
   revalidatePath('/registro')
-  return { carpeta }
+
+  return {
+    nombreArchivo: `expensas-${mesDelPeriodo(vencimiento).toLowerCase()}-${vencimiento.slice(0, 4)}.eml`,
+    emlBase64: eml.toString('base64'),
+  }
 }

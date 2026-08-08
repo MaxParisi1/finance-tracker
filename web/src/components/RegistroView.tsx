@@ -74,9 +74,22 @@ function Celda({ celda, esConsorcio }: { celda: CeldaRegistro | undefined; esCon
   )
 }
 
+/** Dispara la descarga del .eml que devolvió el servidor. */
+function descargarEml(nombre: string, base64: string): void {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'message/rfc822' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombre
+  a.click()
+  // Se revoca en el próximo tick: revocar antes de que el navegador arranque la
+  // descarga la cancela en algunos navegadores.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 /**
- * Genera el borrador del mail al consorcio con el comprobante adjunto.
- * Solo crea el borrador — el envío lo hacés vos desde Thunderbird.
+ * Descarga el mail al consorcio, ya armado y con el comprobante adjunto.
+ * El envío lo hacés vos desde Thunderbird: el sistema no manda nada.
  */
 function BotonBorrador({ celda }: { celda: CeldaRegistro }) {
   const [isPending, startTransition] = useTransition()
@@ -89,18 +102,19 @@ function BotonBorrador({ celda }: { celda: CeldaRegistro }) {
       type="button"
       disabled={isPending}
       title={hecho
-        ? 'Borrador ya generado — hacé click para generar otro'
-        : 'Generar el borrador al consorcio con el comprobante adjunto'}
+        ? 'Mail ya generado — hacé click para descargarlo otra vez'
+        : 'Descargar el mail al consorcio con el comprobante adjunto'}
       onClick={e => {
         e.stopPropagation()
         startTransition(async () => {
           const r = await crearBorradorConsorcioAction(celda.factura_id)
-          if (r.ok) {
-            setHecho(true)
-            toast.success(`Borrador creado en "${r.carpeta}". Abrilo en Thunderbird y enviá.`)
-          } else {
+          if (!r.ok) {
             toast.error(r.error, { duration: 10000 })
+            return
           }
+          descargarEml(r.nombreArchivo, r.emlBase64)
+          setHecho(true)
+          toast.success('Mail descargado. Abrilo en Thunderbird y hacé "Editar como nuevo".')
         })
       }}
       className={cn(
@@ -108,7 +122,7 @@ function BotonBorrador({ celda }: { celda: CeldaRegistro }) {
         hecho ? 'text-success hover:text-primary' : 'text-muted-foreground/50 hover:text-primary',
         isPending && 'animate-pulse',
       )}
-      aria-label="Generar borrador al consorcio"
+      aria-label="Descargar mail al consorcio"
     >
       <Icono className="w-3.5 h-3.5" />
     </button>
@@ -198,7 +212,7 @@ export default function RegistroView({ registro }: { registro: Registro }) {
           <CircleDashed className="w-3.5 h-3.5" /> sin factura ese mes
         </span>
         <span className="flex items-center gap-1.5">
-          <Mail className="w-3.5 h-3.5" /> borrador al consorcio (solo expensas)
+          <Mail className="w-3.5 h-3.5" /> descargar mail al consorcio (solo expensas)
         </span>
         <span className="text-muted-foreground/70">Los íconos en verde abren el PDF en Drive.</span>
       </div>

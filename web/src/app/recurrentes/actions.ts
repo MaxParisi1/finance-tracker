@@ -194,7 +194,9 @@ export async function toggleRecurrenteAction(id: string, activo: boolean) {
   revalidatePath('/recurrentes')
 }
 
-export async function registrarCobroAction(formData: FormData): Promise<void> {
+export async function registrarCobroAction(
+  formData: FormData,
+): Promise<{ fallidos: string[] }> {
   const recurrenteId = formData.get('recurrenteId') as string
   const monto = parseFloat(formData.get('monto') as string)
   const moneda = (formData.get('moneda') as string).toUpperCase()
@@ -204,8 +206,8 @@ export async function registrarCobroAction(formData: FormData): Promise<void> {
   const medio_pago = formData.get('medio_pago') as string
   const frecuencia = formData.get('frecuencia') as string
   const proximo_vencimiento = formData.get('proximo_vencimiento') as string
-  const file = formData.get('file') as File | null
-  const tipo_doc = (formData.get('tipo_doc') as string) || 'factura'
+  const files = formData.getAll('files') as File[]
+  const tipos = formData.getAll('tipos') as string[]
 
   const supabase = getSupabaseServer()
 
@@ -241,30 +243,40 @@ export async function registrarCobroAction(formData: FormData): Promise<void> {
 
   if (error || !gasto) throw new Error(error?.message ?? 'Error al crear el gasto')
 
-  if (file && file.size > 0) {
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const { driveFileId, driveFileName, driveWebViewLink, driveFolderPath } = await subirArchivoDrive({
-      fileBuffer: buffer,
-      mimeType: file.type || 'application/pdf',
-      comercio: descripcion,
-      fecha,
-      tipo: tipo_doc,
-    })
-    await supabase.from('archivos_drive').insert({
-      gasto_id: gasto.id,
-      tipo: tipo_doc,
-      comercio: descripcion,
-      fecha,
-      categoria,
-      monto,
-      moneda,
-      drive_file_id: driveFileId,
-      drive_file_name: driveFileName,
-      drive_web_view_link: driveWebViewLink,
-      drive_folder_path: driveFolderPath,
-      mime_type: file.type || 'application/pdf',
-    })
+  // Se suben de a uno y en orden: si Drive falla en el tercero, los dos primeros
+  // ya quedaron guardados y el gasto también. Se informa cuáles fallaron en vez
+  // de tirar todo abajo.
+  const fallidos: string[] = []
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    if (!file || file.size === 0) continue
+    const tipo = tipos[i] || 'factura'
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const { driveFileId, driveFileName, driveWebViewLink, driveFolderPath } = await subirArchivoDrive({
+        fileBuffer: buffer,
+        mimeType: file.type || 'application/pdf',
+        comercio: descripcion,
+        fecha,
+        tipo,
+      })
+      await supabase.from('archivos_drive').insert({
+        gasto_id: gasto.id,
+        tipo,
+        comercio: descripcion,
+        fecha,
+        categoria,
+        monto,
+        moneda,
+        drive_file_id: driveFileId,
+        drive_file_name: driveFileName,
+        drive_web_view_link: driveWebViewLink,
+        drive_folder_path: driveFolderPath,
+        mime_type: file.type || 'application/pdf',
+      })
+    } catch (e: any) {
+      fallidos.push(`${file.name}: ${e?.message ?? 'error al subir'}`)
+    }
   }
 
   let nuevaFecha: string
@@ -287,4 +299,8 @@ export async function registrarCobroAction(formData: FormData): Promise<void> {
   revalidatePath('/gastos')
   revalidatePath('/dashboard')
   revalidatePath('/comprobantes')
+
+  // El cobro quedó registrado igual; los archivos que fallaron se reportan para
+  // que el usuario los reintente sin volver a crear el gasto.
+  return { fallidos }
 }

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { X, Info } from 'lucide-react'
 import { toast } from 'sonner'
+import MontoInput from '@/components/ui/MontoInput'
 
 const labelClass = 'block text-xs font-medium text-muted-foreground mb-1.5'
 const fieldClass = cn(
@@ -88,12 +89,9 @@ export default function RegistrarPagoCuotaModal({ plan, onClose }: Props) {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className={labelClass}>Monto *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
+              <MontoInput
                 value={monto}
-                onChange={e => setMonto(e.target.value)}
+                onChange={n => setMonto(n === null ? '' : String(n))}
                 placeholder="0"
                 className={fieldClass}
                 autoFocus

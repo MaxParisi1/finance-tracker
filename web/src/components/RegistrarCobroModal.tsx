@@ -1,22 +1,15 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
-import { Upload, X, FileText, Check } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { X, Check } from 'lucide-react'
+import SelectorArchivos, { type ArchivoPendiente } from '@/components/ui/SelectorArchivos'
 import type { RecurrenteConCosto } from '@/lib/queries'
 import { registrarCobroAction } from '@/app/recurrentes/actions'
 import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-
-const TIPOS_DOC = [
-  { value: 'factura',     label: 'Factura' },
-  { value: 'comprobante', label: 'Comprobante' },
-  { value: 'ticket',      label: 'Ticket' },
-  { value: 'recibo',      label: 'Recibo' },
-]
-
-const ACCEPT = 'application/pdf,image/jpeg,image/png,image/webp,image/heic'
+import MontoInput from '@/components/ui/MontoInput'
 
 interface Props {
   recurrente: RecurrenteConCosto
@@ -29,26 +22,10 @@ interface Props {
 
 export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesObjetivoLabel, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [tipo_doc, setTipoDoc] = useState('factura')
+  const [archivos, setArchivos] = useState<ArchivoPendiente[]>([])
   const [monto, setMonto] = useState(String(r.ultimo_monto_original ?? r.monto_original))
   const [fecha, setFecha] = useState(fechaDefault ?? new Date().toISOString().split('T')[0])
-  const [dragOver, setDragOver] = useState(false)
   const [done, setDone] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  function handleFile(f: File) {
-    setFile(f)
-    setPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : null)
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    setDragOver(false)
-    const f = e.dataTransfer.files[0]
-    if (f) handleFile(f)
-  }
 
   function handleSubmit() {
     const montoNum = parseFloat(monto)
@@ -69,16 +46,28 @@ export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesOb
         fd.append('medio_pago', r.medio_pago)
         fd.append('frecuencia', r.frecuencia)
         fd.append('proximo_vencimiento', r.proximo_vencimiento)
-        if (file) {
-          fd.append('file', file)
-          fd.append('tipo_doc', tipo_doc)
+        for (const a of archivos) {
+          fd.append('files', a.file)
+          fd.append('tipos', a.tipo)
         }
 
-        await registrarCobroAction(fd)
+        const { fallidos } = await registrarCobroAction(fd)
 
+        if (fallidos.length > 0) {
+          // El gasto ya se creó: no se puede reintentar todo desde acá sin
+          // duplicarlo. Se avisa para adjuntar lo que falta desde el gasto.
+          toast.error(
+            `Cobro registrado, pero ${fallidos.length} archivo(s) no se subieron. ` +
+            `Adjuntalos desde el gasto.`,
+          )
+        } else {
+          toast.success(
+            archivos.length === 0 ? 'Cobro registrado'
+              : `Cobro registrado con ${archivos.length} documento(s)`,
+          )
+        }
         setDone(true)
-        toast.success(`Cobro registrado${file ? ' con comprobante' : ''}`)
-        setTimeout(onClose, 800)
+        setTimeout(onClose, 900)
       } catch (e: any) {
         toast.error(e.message ?? 'Error al registrar')
       }
@@ -121,11 +110,9 @@ export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesOb
               <label className={labelClass}>
                 Monto{r.moneda !== 'ARS' && <span className="text-primary ml-1">{r.moneda}</span>}
               </label>
-              <input
-                type="number"
-                step="0.01"
+              <MontoInput
                 value={monto}
-                onChange={e => setMonto(e.target.value)}
+                onChange={n => setMonto(n === null ? '' : String(n))}
                 className={fieldClass}
                 autoFocus
               />
@@ -141,80 +128,20 @@ export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesOb
             </div>
           </div>
 
-          {/* Drop zone — opcional */}
+          {/* Documentos — opcional, varios y con tipo por archivo */}
           <div>
             <label className={labelClass}>
-              Comprobante <span className="text-muted-foreground/60 font-normal">(opcional)</span>
+              Documentos <span className="text-muted-foreground/60 font-normal">(opcional)</span>
             </label>
-            <div
-              onClick={() => inputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              className={cn(
-                'relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 cursor-pointer transition-all duration-200',
-                dragOver
-                  ? 'border-primary bg-primary/5 scale-[1.01]'
-                  : file
-                  ? 'border-success/60 bg-success/5'
-                  : 'border-border hover:border-primary/50 hover:bg-muted/50',
-              )}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                accept={ACCEPT}
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
-              />
-
-              {preview ? (
-                <img src={preview} alt="preview" className="max-h-24 rounded-lg object-contain mb-2" />
-              ) : file ? (
-                <FileText className="w-8 h-8 text-success mb-1.5" />
-              ) : (
-                <Upload className="w-7 h-7 text-muted-foreground mb-1.5" />
-              )}
-
-              {file ? (
-                <div className="text-center">
-                  <p className="text-sm font-medium text-foreground truncate max-w-[240px]">{file.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {(file.size / 1024).toFixed(0)} KB · Click para cambiar
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">Arrastrá o hacé click</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">PDF, JPG, PNG, WEBP</p>
-                </div>
-              )}
-            </div>
+            <SelectorArchivos
+              archivos={archivos}
+              onChange={setArchivos}
+              fecha={fecha}
+              comercio={r.descripcion}
+              opcional
+              disabled={isPending}
+            />
           </div>
-
-          {/* Tipo de doc — solo cuando hay archivo */}
-          {file && (
-            <div>
-              <label className={labelClass}>Tipo de documento</label>
-              <div className="grid grid-cols-4 gap-2">
-                {TIPOS_DOC.map(t => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setTipoDoc(t.value)}
-                    className={cn(
-                      'py-2 px-1 rounded-lg text-xs font-medium border transition-all duration-150',
-                      tipo_doc === t.value
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
-                    )}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Footer */}
@@ -237,7 +164,9 @@ export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesOb
             >
               {isPending
                 ? 'Registrando...'
-                : file ? 'Registrar con comprobante' : 'Registrar cobro'}
+                : archivos.length > 0
+                ? `Registrar con ${archivos.length} doc.`
+                : 'Registrar cobro'}
             </ShimmerButton>
           )}
         </div>

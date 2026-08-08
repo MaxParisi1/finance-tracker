@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress'
 import { Plus, X, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { BorderBeam } from '@/components/magicui/border-beam'
+import MontoInput from '@/components/ui/MontoInput'
 
 interface PresupuestoConGasto {
   id: string
@@ -144,10 +145,9 @@ export default function PresupuestosView({ presupuestos, categorias, mes, anio }
                 <div className="flex items-center gap-2 ml-4 flex-shrink-0">
                   {isEditing ? (
                     <>
-                      <input
-                        type="number"
+                      <MontoInput
                         value={editLimite}
-                        onChange={e => setEditLimite(e.target.value)}
+                        onChange={n => setEditLimite(n === null ? '' : String(n))}
                         className={cn(inputClass, 'w-28')}
                         placeholder={String(p.monto_limite)}
                         autoFocus
@@ -201,10 +201,9 @@ export default function PresupuestosView({ presupuestos, categorias, mes, anio }
                 <option value="">Seleccionar categoría...</option>
                 {categoriasDisponibles.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <input
-                type="number"
+              <MontoInput
                 value={newLimite}
-                onChange={e => setNewLimite(e.target.value)}
+                onChange={n => setNewLimite(n === null ? '' : String(n))}
                 placeholder="Límite ARS"
                 className={cn(inputClass, 'w-36')}
               />

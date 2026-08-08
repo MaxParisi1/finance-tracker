@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { toast } from 'sonner'
+import MontoInput from '@/components/ui/MontoInput'
 
 const FRECUENCIA_OPTIONS = [
   { value: 'mensual', label: 'Mensual' },
@@ -134,9 +135,9 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
           <div className="flex gap-3">
             <div className="flex-1">
               <label className={labelClass}>Monto</label>
-              <input
-                type="number" step="0.01" value={form.monto_original}
-                onChange={e => set('monto_original', parseFloat(e.target.value) || 0)}
+              <MontoInput
+                value={form.monto_original}
+                onChange={n => set('monto_original', n ?? 0)}
                 className={fieldClass}
               />
             </div>

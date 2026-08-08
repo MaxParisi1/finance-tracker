@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import AdjuntarArchivoModal from '@/components/AdjuntarArchivoModal'
 import VincularRecurrenteModal from '@/components/VincularRecurrenteModal'
 import type { GastoRecurrente } from '@/lib/types'
+import MontoInput from '@/components/ui/MontoInput'
 
 const MEDIO_PAGO_OPTIONS = Object.entries(MEDIO_PAGO_LABELS)
 
@@ -145,9 +146,9 @@ export default function EditGastoModal({ gasto, categorias, comercios, recurrent
           <div className="flex gap-3">
             <div className="flex-1">
               <label className={labelClass}>Monto</label>
-              <input
-                type="number" step="0.01" value={form.monto}
-                onChange={e => set('monto', parseFloat(e.target.value) || 0)}
+              <MontoInput
+                value={form.monto}
+                onChange={n => set('monto', n ?? 0)}
                 className={fieldClass}
               />
             </div>

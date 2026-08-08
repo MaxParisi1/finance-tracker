@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
+import MontoInput from '@/components/ui/MontoInput'
 
 const MEDIO_PAGO_OPTIONS = Object.entries(MEDIO_PAGO_LABELS)
 
@@ -169,12 +170,9 @@ export default function PlanCuotaModal({ plan, categorias, onClose }: Props) {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className={labelClass}>Monto por cuota *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <MontoInput
                   value={form.monto_cuota}
-                  onChange={e => set('monto_cuota', e.target.value)}
+                  onChange={n => set('monto_cuota', n === null ? '' : String(n))}
                   className={fieldClass}
                   placeholder="0"
                 />

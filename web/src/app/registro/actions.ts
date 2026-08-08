@@ -8,15 +8,32 @@ import { crearBorrador } from '@/lib/outlook'
 import { ASUNTO, cuerpo } from '@/lib/plantillaConsorcio'
 import { getSupabaseServer } from '@/lib/supabase'
 
+export type ResultadoBorrador =
+  | { ok: true; carpeta: string }
+  | { ok: false; error: string }
+
 /**
  * Deja en Borradores de Outlook el mail al consorcio con el comprobante del mes.
  *
  * No envía nada: el usuario lo revisa y lo manda desde su cliente. Por eso se
  * registra `borrador_consorcio_at` como "generado", no como "enviado".
+ *
+ * Devuelve el error en vez de lanzarlo: Next oculta los mensajes de excepción
+ * en producción ("digest property..."), lo que deja al usuario sin saber qué
+ * pasó. Devolviéndolo, el detalle llega al toast.
  */
 export async function crearBorradorConsorcioAction(
   facturaId: string,
-): Promise<{ carpeta: string }> {
+): Promise<ResultadoBorrador> {
+  try {
+    return { ok: true, ...(await generarBorrador(facturaId)) }
+  } catch (e: any) {
+    console.error('[borrador-consorcio] falló', e)
+    return { ok: false, error: e?.message ?? 'Error desconocido' }
+  }
+}
+
+async function generarBorrador(facturaId: string): Promise<{ carpeta: string }> {
   if (!borradorConsorcioConfigurado()) {
     throw new Error(
       'Falta configurar OUTLOOK_EMAIL, OUTLOOK_APP_PASSWORD y CONSORCIO_EMAIL',

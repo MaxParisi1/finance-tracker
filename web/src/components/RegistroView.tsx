@@ -94,12 +94,12 @@ function BotonBorrador({ celda }: { celda: CeldaRegistro }) {
       onClick={e => {
         e.stopPropagation()
         startTransition(async () => {
-          try {
-            const { carpeta } = await crearBorradorConsorcioAction(celda.factura_id)
+          const r = await crearBorradorConsorcioAction(celda.factura_id)
+          if (r.ok) {
             setHecho(true)
-            toast.success(`Borrador creado en "${carpeta}". Abrilo en Thunderbird y enviá.`)
-          } catch (err: any) {
-            toast.error(err?.message ?? 'No pude crear el borrador')
+            toast.success(`Borrador creado en "${r.carpeta}". Abrilo en Thunderbird y enviá.`)
+          } else {
+            toast.error(r.error, { duration: 10000 })
           }
         })
       }}

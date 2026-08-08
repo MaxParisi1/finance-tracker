@@ -151,12 +151,26 @@ export async function subirArchivoDrive(params: {
   }
 }
 
-/** Baja el contenido de un archivo de Drive por su ID. */
+/**
+ * Baja el contenido de un archivo de Drive por su ID.
+ *
+ * Se valida el tipo del cuerpo: según la versión de gaxios puede llegar como
+ * Buffer o como ArrayBuffer, y si alguna vez llegara como string el PDF se
+ * corrompería en silencio al convertirlo. Mejor fallar que adjuntar basura.
+ */
 export async function descargarArchivoDrive(driveFileId: string): Promise<Buffer> {
   const drive = buildDriveClient()
   const res = await drive.files.get(
     { fileId: driveFileId, alt: 'media' },
     { responseType: 'arraybuffer' },
   )
-  return Buffer.from(res.data as ArrayBuffer)
+
+  const data = res.data as unknown
+  if (Buffer.isBuffer(data)) return data
+  if (data instanceof ArrayBuffer) return Buffer.from(new Uint8Array(data))
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+
+  throw new Error(
+    `Drive devolvió el archivo ${driveFileId} en un formato inesperado (${typeof data})`,
+  )
 }

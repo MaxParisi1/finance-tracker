@@ -43,5 +43,16 @@ export async function construirEml(p: MensajeParams): Promise<Buffer> {
       contentType: a.contentType,
     })),
   })
-  return await composer.compile().build()
+
+  const nodo = composer.compile()
+
+  // Nodemailer descarta el Bcc al compilar, y con razón: en un envío real la
+  // copia oculta no debe viajar en el mensaje. Pero acá el .eml es un borrador
+  // que abrís vos, así que sin el header perderías la copia de control.
+  //
+  // `keepBcc` es una opción de MimeNode que MailComposer no expone, por eso se
+  // setea sobre el nodo ya compilado, antes de construirlo.
+  ;(nodo as unknown as { keepBcc: boolean }).keepBcc = true
+
+  return await nodo.build()
 }

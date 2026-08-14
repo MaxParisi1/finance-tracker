@@ -1,18 +1,19 @@
 """
 Tarea en background: consulta Gmail cada 15 minutos buscando emails bancarios.
-- Etiqueta "Consumos": emails genéricos (BBVA, Mastercard, etc.) parseados con Gemini.
+- Etiqueta "Consumos": emails genéricos (BBVA, Mastercard, etc.) parseados con un LLM.
 - Etiqueta "Consumos_visa": notificaciones Prisma/Visa; medio_pago resuelto por sufijo de tarjeta.
+
+Regla de oro ante un fallo del LLM: no marcar el email como leído. El estado "no
+leído" de Gmail es la cola de reintentos — es durable y no cuesta nada. Guardar
+un gasto con datos degradados sí cuesta: queda mal para siempre y en silencio.
 """
 
 import asyncio
-import json
 import logging
 import re
 
-from google.genai import types
-
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
-from bot.gemini_client import generate_with_fallback
+from bot.llm_client import LLMUnavailable, generar_json
 from bot.tools.gastos import guardar_gasto, historial_comercio
 from bot.tools.montos import parse_monto_ar
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
@@ -93,9 +94,9 @@ def _parse_prisma_email(email: dict) -> dict | None:
     }
 
 
-def _parse_email_with_gemini(email: dict) -> dict | None:
+def _parse_email_con_llm(email: dict) -> dict | None:
     """
-    Usa Gemini para extraer datos de transacción de un email bancario genérico.
+    Extrae los datos de transacción de un email bancario genérico.
 
     Devuelve None si el email legítimamente no es una transacción.
     Lanza excepción ante un fallo transitorio (cuota/red/JSON inválido): el caller
@@ -133,15 +134,10 @@ Cuerpo:
 {email['body'][:2000]}
 """
 
-    response = generate_with_fallback(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-
-    # Un JSON inválido es un fallo transitorio: propagamos para reintentar y avisar,
-    # en vez de descartar silenciosamente un gasto real.
-    data = json.loads(response.text)
+    # generar_json ya trata cuota/red/JSON inválido como transitorio y levanta
+    # LLMUnavailable. Propagamos para reintentar y avisar, en vez de descartar
+    # silenciosamente un gasto real.
+    data = generar_json(prompt)
     if not data.get("es_transaccion"):
         return None
     return data
@@ -150,9 +146,14 @@ Cuerpo:
 def _enriquecer_prisma(parsed: dict) -> dict:
     """
     Enriquece los datos parseados de un email Prisma con campos que requieren inteligencia.
-    Primero intenta con el historial local (sin costo). Si el comercio es nuevo, llama a Gemini
+    Primero intenta con el historial local (sin costo). Si el comercio es nuevo, llama al LLM
     para obtener categoria, descripcion y notas en un único request.
     Devuelve un dict con: categoria, descripcion, notas.
+
+    Lanza excepción si el LLM no está disponible. Antes esto devolvía
+    {"categoria": "Otros"} y el caller guardaba el gasto igual y marcaba el email
+    como leído: un 429 quedaba indistinguible de "el modelo dijo Otros" y el gasto
+    quedaba mal categorizado para siempre. Preferimos no procesar y reintentar.
     """
     comercio = parsed["comercio"]
 
@@ -188,21 +189,12 @@ Respondé SOLO con un JSON:
 
 Categorías válidas: {categorias_str}."""
 
-    try:
-        response = generate_with_fallback(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = json.loads(response.text)
-        return {
-            "categoria": data.get("categoria", "Otros"),
-            "descripcion": data.get("descripcion") or comercio,
-            "notas": data.get("notas") or None,
-        }
-    except Exception:
-        logger.warning("Gemini falló al enriquecer email Prisma de %s", comercio)
-        return {"categoria": "Otros", "descripcion": comercio, "notas": None}
+    data = generar_json(prompt)
+    return {
+        "categoria": data.get("categoria", "Otros"),
+        "descripcion": data.get("descripcion") or comercio,
+        "notas": data.get("notas") or None,
+    }
 
 
 async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
@@ -212,7 +204,7 @@ async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
         if candidato is None:
             return
         comercio = gasto.get("comercio") or gasto.get("descripcion") or ""
-        if candidato.metodo in ("alias", "fuzzy", "gemini"):
+        if candidato.metodo in ("alias", "fuzzy", "llm"):
             await asyncio.to_thread(
                 matcher.confirmar_vinculacion,
                 gasto["id"], candidato.recurrente, comercio,
@@ -229,6 +221,20 @@ async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
             )
         else:
             await matcher.solicitar_confirmacion_telegram(bot, chat_id, gasto, candidato)
+
+    except LLMUnavailable:
+        # El gasto ya está guardado, así que reintentar el email no sirve: la
+        # idempotencia lo descartaría. Avisamos para que se vincule a mano.
+        logger.warning(
+            "LLM no disponible al evaluar recurrente para gasto %s", gasto.get("id")
+        )
+        com_esc = _escape_md(gasto.get("comercio") or gasto.get("descripcion") or "")
+        await _safe_alert(
+            bot, chat_id,
+            f"⚠️ *Recurrente sin evaluar*\n"
+            f"Guardé el gasto de {com_esc} pero no pude chequear si corresponde a un "
+            f"recurrente (LLM sin cuota).\nSi era uno, vinculalo a mano.",
+        )
     except Exception:
         logger.exception("Error al intentar match recurrente para gasto %s", gasto.get("id"))
 
@@ -283,7 +289,7 @@ async def poll_gmail_once(bot, chat_id: int) -> bool:
                 continue
 
             try:
-                data = await asyncio.to_thread(_parse_email_with_gemini, email)
+                data = await asyncio.to_thread(_parse_email_con_llm, email)
             except Exception:
                 logger.exception("Fallo transitorio parseando email %s (no se marca leído)", email["id"])
                 await _alertar_email_no_procesado(bot, chat_id, email)
@@ -377,7 +383,16 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
             medio_pago, tarjeta_row = await asyncio.to_thread(resolver_medio_pago, sufijo, moneda)
             tarjeta_nombre = nombre_tarjeta(tarjeta_row)
 
-            enriquecido = await asyncio.to_thread(_enriquecer_prisma, parsed)
+            try:
+                enriquecido = await asyncio.to_thread(_enriquecer_prisma, parsed)
+            except Exception:
+                # Sin enriquecer no guardamos: el email queda sin leer y se reintenta
+                # en el próximo ciclo. Guardarlo como "Otros" sería un dato malo permanente.
+                logger.exception(
+                    "Fallo enriqueciendo email Visa %s (no se marca leído)", email["id"]
+                )
+                await _alertar_email_no_procesado(bot, chat_id, email)
+                continue
 
             gasto_guardado = await asyncio.to_thread(
                 guardar_gasto,
@@ -466,7 +481,7 @@ async def _loop_poll(bot, chat_id: int, poll_fn, nombre: str) -> None:
                 await _safe_alert(
                     bot, chat_id,
                     f"⚠️ Poller *{nombre}* falló {fallos} ciclos seguidos (~{minutos} min).\n"
-                    f"Revisá el token de Gmail, la cuota de Gemini o los logs del servidor.",
+                    f"Revisá el token de Gmail, la cuota del LLM o los logs del servidor.",
                 )
                 alertado = True
 

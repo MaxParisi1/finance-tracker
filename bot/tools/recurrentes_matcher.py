@@ -2,29 +2,27 @@
 Matching entre gastos de Gmail y gastos_recurrentes en 4 capas:
   1. Alias exacto    → auto-vincular (confianza 1.0)
   2. Fuzzy ≥ 85      → auto-vincular (confianza alta)
-  3. Gemini ≥ 0.80   → auto-vincular (Gemini lo confirma)
-  4. Gemini 0.50-0.79 → pedir confirmación al usuario vía Telegram
+  3. LLM ≥ 0.80      → auto-vincular (el modelo lo confirma)
+  4. LLM 0.50-0.79   → pedir confirmación al usuario vía Telegram
 
 Filtros duros previos: moneda exacta, monto ±20%, fecha ±12 días del proximo_vencimiento.
 """
 
 import calendar
-import json
 import logging
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 from rapidfuzz import fuzz
-from google.genai import types
 
 from bot.db import queries
-from bot.gemini_client import generate_with_fallback
+from bot.llm_client import generar_json
 
 logger = logging.getLogger(__name__)
 
 FUZZY_AUTO = 85
-FUZZY_GEMINI = 55       # umbral para dejar que Gemini arbitre (antes 60)
+FUZZY_LLM = 55          # umbral para dejar que el LLM arbitre (antes 60)
 MONTO_TOL = 0.20        # variación "cómoda"; dentro de esto no se penaliza
 MONTO_TOL_HARD = 0.60   # rechazo duro solo si el monto difiere muchísimo
 FECHA_WINDOW = 25       # días; ventana holgada para cadencias irregulares (antes 12)
@@ -42,7 +40,7 @@ _pending: dict[str, tuple[str, str, str, float, str | None]] = {}
 class CandidatoMatch:
     recurrente: dict
     confianza: float  # 0-1
-    metodo: str       # 'alias' | 'fuzzy' | 'gemini' | 'usuario_pendiente'
+    metodo: str       # 'alias' | 'fuzzy' | 'llm' | 'usuario_pendiente'
 
 
 # ──────────────────────────────────────────────
@@ -104,10 +102,18 @@ def _motivo_rechazo(gasto: dict, rec: dict, *, es_alias: bool = False) -> str | 
 
 
 # ──────────────────────────────────────────────
-# Gemini arbiter
+# Árbitro LLM
 # ──────────────────────────────────────────────
 
-def _score_gemini(gasto: dict, rec: dict) -> float:
+def _score_llm(gasto: dict, rec: dict) -> float:
+    """
+    Confianza 0-1 de que el gasto corresponde al recurrente.
+
+    Propaga la excepción si el LLM no está disponible. Antes devolvía 0.0, que es
+    indistinguible de "el modelo dice que no matchea": el gasto quedaba sin vincular
+    y sin aviso. Acá el gasto ya está guardado, así que reintentar no sirve; lo que
+    corresponde es avisarle al usuario para que lo vincule a mano.
+    """
     prompt = f"""¿Este pago corresponde al recurrente indicado? Respondé SOLO con JSON.
 
 Pago recibido:
@@ -122,17 +128,8 @@ Recurrente esperado:
 
 {{"match": true, "confianza": 0.0-1.0, "razon": "..."}}"""
 
-    try:
-        resp = generate_with_fallback(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = json.loads(resp.text)
-        return float(data.get('confianza', 0)) if data.get('match') else 0.0
-    except Exception:
-        logger.warning("Gemini falló al evaluar match recurrente")
-        return 0.0
+    data = generar_json(prompt)
+    return float(data.get('confianza', 0)) if data.get('match') else 0.0
 
 
 # ──────────────────────────────────────────────
@@ -213,16 +210,16 @@ def encontrar_candidato_db(gasto: dict) -> CandidatoMatch | None:
         logger.info("  → auto-vinculado por fuzzy (score=%d)", best_score)
         return CandidatoMatch(recurrente=best_rec, confianza=best_score / 100, metodo='fuzzy')
 
-    # Capas 3-4: Gemini solo si hay candidato razonablemente cercano
-    if best_score >= FUZZY_GEMINI:
-        conf = _score_gemini(gasto, best_rec)
-        logger.info("  Gemini confianza=%.2f", conf)
+    # Capas 3-4: el LLM sólo si hay candidato razonablemente cercano
+    if best_score >= FUZZY_LLM:
+        conf = _score_llm(gasto, best_rec)
+        logger.info("  LLM confianza=%.2f", conf)
         if conf >= 0.80:
-            return CandidatoMatch(recurrente=best_rec, confianza=conf, metodo='gemini')
+            return CandidatoMatch(recurrente=best_rec, confianza=conf, metodo='llm')
         if conf >= 0.50:
             return CandidatoMatch(recurrente=best_rec, confianza=conf, metodo='usuario_pendiente')
 
-    logger.info("  → sin match (mejor score=%d < %d)", best_score, FUZZY_GEMINI)
+    logger.info("  → sin match (mejor score=%d < %d)", best_score, FUZZY_LLM)
     return None
 
 

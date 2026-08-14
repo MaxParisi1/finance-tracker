@@ -1,6 +1,7 @@
 python-telegram-bot>=22.0
 rapidfuzz>=3.0.0
-google-genai>=1.5.0
+# Único cliente de LLM del proyecto: Groq/Cerebras vía API compatible OpenAI.
+openai>=1.60.0
 supabase>=2.10.0
 python-dotenv==1.0.1
 pdfplumber==0.11.9

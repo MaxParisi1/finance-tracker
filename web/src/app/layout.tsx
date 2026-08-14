@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter, Fraunces } from 'next/font/google'
 import './globals.css'
-import ChatPanel from '@/components/ChatPanel'
 import BottomNav from '@/components/BottomNav'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { Toaster } from 'sonner'
@@ -52,7 +51,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
-          <ChatPanel />
           <BottomNav />
           <Toaster richColors position="top-right" />
         </ThemeProvider>

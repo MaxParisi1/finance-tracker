@@ -1,7 +1,17 @@
 """
 Entry point del bot de Telegram.
-- Si TELEGRAM_WEBHOOK_URL está definida → modo webhook (producción en Railway)
-- Si no está definida → modo polling (desarrollo local)
+- Si TELEGRAM_WEBHOOK_URL está definida → modo webhook (requiere URL pública)
+- Si no está definida → modo polling (es como corre hoy en el VPS y en local)
+
+Este proceso es sobre todo el host de los pollers de Gmail y del loop de
+recordatorios (ver start_gmail_polling): tiene que estar corriendo siempre,
+aunque nadie le escriba.
+
+Por Telegram el bot es un canal de salida (notificaciones y alertas) más tres
+entradas puntuales: los botones de confirmación de recurrentes, el archivado de
+facturas en PDF y los comandos. El agente conversacional se eliminó — no se
+usaba y era la última atadura a la API de Gemini. Si alguna vez hace falta,
+está en el historial: `git show 944b1f3:bot/agent.py`.
 """
 
 import os
@@ -19,11 +29,8 @@ from telegram.ext import (
     filters,
 )
 
-from bot.agent import run_agent
 from bot.gmail_poller import start_gmail_polling
 from bot.tools import recurrentes_matcher as matcher
-from bot.tools.media_processor import procesar_audio, audio_a_mensaje
-from bot.db.queries import cargar_historial_bot, guardar_historial_bot
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -34,47 +41,9 @@ logger = logging.getLogger(__name__)
 # ID de Telegram del único usuario autorizado
 ALLOWED_USER_ID = int(os.environ["ALLOWED_TELEGRAM_USER_ID"])
 
-# Historial de conversación: cache en memoria + persistencia en Supabase
-# Estructura: { chat_id: [{"role": "user"|"model", "parts": ["..."]}] }
-_conversation_history: dict[int, list[dict]] = {}
-
-MAX_HISTORY_TURNS = 20
-
-
-async def safe_reply(message, text: str) -> None:
-    """Intenta enviar con Markdown; si Telegram rechaza, envía como texto plano."""
-    try:
-        await message.reply_text(text, parse_mode="Markdown")
-    except Exception:
-        await message.reply_text(text)
-
-
 def _is_authorized(update: Update) -> bool:
     """Valida que el mensaje provenga del usuario autorizado."""
     return update.effective_user is not None and update.effective_user.id == ALLOWED_USER_ID
-
-
-def _get_history(chat_id: int) -> list[dict]:
-    """Devuelve historial desde cache en memoria; si no existe, carga desde DB."""
-    if chat_id not in _conversation_history:
-        try:
-            _conversation_history[chat_id] = cargar_historial_bot(chat_id)
-        except Exception:
-            _conversation_history[chat_id] = []
-    return _conversation_history[chat_id]
-
-
-def _add_to_history(chat_id: int, role: str, text: str) -> None:
-    if chat_id not in _conversation_history:
-        _conversation_history[chat_id] = []
-    _conversation_history[chat_id].append({"role": role, "parts": [text]})
-    if len(_conversation_history[chat_id]) > MAX_HISTORY_TURNS * 2:
-        _conversation_history[chat_id] = _conversation_history[chat_id][-MAX_HISTORY_TURNS * 2:]
-    # Persistir en Supabase (best-effort)
-    try:
-        guardar_historial_bot(chat_id, _conversation_history[chat_id])
-    except Exception:
-        pass
 
 
 # ──────────────────────────────────────────────
@@ -85,13 +54,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "¡Hola! Soy tu asistente de finanzas personales.\n\n"
-        "Podés decirme cosas como:\n"
-        "• \"Gasté 15000 pesos en el super con débito\"\n"
-        "• \"¿Cuánto gasté en restós este mes?\"\n"
-        "• \"¿Cuánto está el dólar blue?\"\n\n"
-        "También podés mandarme notas de voz, o el PDF de una factura o comprobante\n"
-        "de tus servicios fijos y lo archivo solo."
+        "¡Hola! Registro tus gastos solo, leyendo los emails del banco.\n\n"
+        "Acá te aviso cuando registro uno, cuando algo falla, y te pregunto "
+        "si un gasto corresponde a un recurrente.\n\n"
+        "Lo único que podés mandarme: el PDF o la foto de una factura o "
+        "comprobante de tus servicios fijos, y lo archivo en Drive.\n\n"
+        "Para consultar tus gastos, entrá al dashboard web."
     )
 
 
@@ -99,85 +67,34 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not _is_authorized(update):
         return
     await update.message.reply_text(
-        "*Comandos disponibles:*\n"
-        "/start — Mensaje de bienvenida\n"
-        "/help — Esta ayuda\n"
-        "/reset — Limpiar historial de conversación\n\n"
+        "*Comandos:*\n"
+        "/start — Qué hago\n"
+        "/help — Esta ayuda\n\n"
         "*Podés enviarme:*\n"
-        "• Texto libre describiendo un gasto\n"
-        "• Nota de voz\n"
-        "• PDF de factura o comprobante de un servicio fijo",
+        "• PDF o foto de una factura o comprobante de un servicio fijo\n\n"
+        "*Lo que hago solo:*\n"
+        "• Registro los gastos que llegan por email del banco\n"
+        "• Te aviso si un gasto puede ser un recurrente\n"
+        "• Te alerto si un email no se pudo procesar\n\n"
+        "Para cargar un gasto a mano o ver reportes, usá el dashboard web.",
         parse_mode="Markdown",
     )
 
 
-async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def sin_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Atiende texto libre y notas de voz, que antes iban al agente conversacional.
+
+    Existe sólo para no quedarse mudo: un bot que ignora lo que le escribís se
+    lee como "está roto". Prefiere decir qué sí puede hacer.
+    """
     if not _is_authorized(update):
         return
-    chat_id = update.effective_chat.id
-    _conversation_history.pop(chat_id, None)
-    await update.message.reply_text("Historial limpiado. Empezamos de cero.")
-
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler principal para mensajes de texto."""
-    if not _is_authorized(update):
-        return
-
-    user_text = update.message.text
-    chat_id = update.effective_chat.id
-
-    # Indicador de "escribiendo..."
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-    history = _get_history(chat_id)
-
-    try:
-        response = run_agent(user_text, history, chat_id=chat_id)
-    except Exception as e:
-        logger.exception("Error en el agente")
-        response = "Uy, algo salió mal. Intentá de nuevo en un momento."
-
-    _add_to_history(chat_id, "user", user_text)
-    _add_to_history(chat_id, "model", response)
-
-    await safe_reply(update.message, response)
-
-
-async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa notas de voz con Gemini Audio."""
-    if not _is_authorized(update):
-        return
-
-    chat_id = update.effective_chat.id
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-    # Telegram envía voice notes como OGG/OPUS
-    voice = update.message.voice or update.message.audio
-    file = await context.bot.get_file(voice.file_id)
-    audio_bytes = await file.download_as_bytearray()
-
-    mime_type = "audio/ogg" if update.message.voice else "audio/mpeg"
-
-    try:
-        datos = procesar_audio(bytes(audio_bytes), mime_type=mime_type)
-        mensaje_interno = audio_a_mensaje(datos)
-    except Exception:
-        logger.exception("Error procesando audio")
-        await update.message.reply_text("No pude procesar el audio. Intentá de nuevo o escribí el gasto.")
-        return
-
-    history = _get_history(chat_id)
-    try:
-        response = run_agent(mensaje_interno, history, chat_id=chat_id)
-    except Exception:
-        logger.exception("Error en el agente (audio)")
-        response = "Uy, algo salió mal procesando el audio."
-
-    _add_to_history(chat_id, "user", f"[audio: {datos.get('transcripcion', '...')}]")
-    _add_to_history(chat_id, "model", response)
-
-    await safe_reply(update.message, response)
+    await update.message.reply_text(
+        "Ya no entiendo texto libre ni notas de voz: el chat se eliminó porque no se usaba.\n\n"
+        "Podés mandarme el PDF o la foto de una factura de un servicio fijo y la archivo.\n"
+        "Para todo lo demás, el dashboard web.",
+    )
 
 
 async def _archivar_documento_servicio(
@@ -304,11 +221,12 @@ async def _run() -> None:
     # Registrar handlers
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("help", help_handler))
-    app.add_handler(CommandHandler("reset", reset_handler))
     app.add_handler(CallbackQueryHandler(match_callback_handler, pattern=r"^mr:"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+    # Lo único que el bot procesa de entrada son documentos y los botones de
+    # recurrentes. El resto contesta qué sí puede hacer, en vez de ignorarlo.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, sin_chat_handler))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, sin_chat_handler))
 
     if webhook_url:
         logger.info(f"Iniciando en modo webhook: {webhook_url}")

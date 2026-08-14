@@ -235,34 +235,10 @@ def insertar_tipo_cambio(fecha: str, tipo: str, valor: float) -> None:
     ).execute()
 
 
-# ──────────────────────────────────────────────
-# Sesiones del bot (historial persistente)
-# ──────────────────────────────────────────────
-
-def cargar_historial_bot(chat_id: int) -> list[dict]:
-    """Carga el historial de conversación desde la DB."""
-    client = get_client()
-    res = (
-        client.table("bot_sessions")
-        .select("history")
-        .eq("chat_id", chat_id)
-        .execute()
-    )
-    return res.data[0]["history"] if res.data else []
-
-
-def guardar_historial_bot(chat_id: int, history: list[dict]) -> None:
-    """Upsert del historial de conversación."""
-    from datetime import datetime, timezone
-    client = get_client()
-    client.table("bot_sessions").upsert(
-        {
-            "chat_id": chat_id,
-            "history": history,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
-        on_conflict="chat_id",
-    ).execute()
+# NOTA: acá vivían cargar_historial_bot/guardar_historial_bot, que persistían el
+# historial del agente conversacional en la tabla `bot_sessions`. Se eliminaron
+# junto con el agente. La tabla sigue existiendo en Supabase con los datos
+# viejos; borrarla es seguro pero es una decisión aparte.
 
 
 def obtener_tipo_cambio_historico(fecha: str, tipo: str) -> float | None:

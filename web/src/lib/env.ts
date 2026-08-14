@@ -9,7 +9,6 @@
 const REQUIRED_VARS = [
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'GOOGLE_API_KEY',
 ] as const
 
 const missing = REQUIRED_VARS.filter(v => !process.env[v])
@@ -24,7 +23,6 @@ if (missing.length > 0) {
 export const env = {
   SUPABASE_URL: process.env.SUPABASE_URL!,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY!,
   DASHBOARD_PASSWORD: process.env.DASHBOARD_PASSWORD,
 
   // Borrador de expensas al consorcio. Opcionales a propósito: si faltan, el

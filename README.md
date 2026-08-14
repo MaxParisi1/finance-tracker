@@ -2,6 +2,50 @@
 
 Bot de Telegram + web app para seguimiento de finanzas personales.
 
+El proceso del bot (`finance-bot`) hace dos cosas: atiende Telegram y corre los
+pollers de Gmail que auto-registran los gastos. Aunque no se use el chat, el
+servicio tiene que estar corriendo.
+
+---
+
+## Dependencias del servidor
+
+El bot corre con systemd sobre el venv, sin Docker. Además de `bot/requirements.txt`
+hace falta un paquete de sistema:
+
+```bash
+sudo apt install poppler-utils   # lo necesita pdf2image para el fallback visión del parser BBVA
+```
+
+---
+
+## Variables de entorno del LLM
+
+Las tareas automáticas (parseo de emails bancarios, categorización, matching de
+recurrentes) usan proveedores con free tier amplio, en cadena. Alcanza con
+configurar uno, pero con los dos hay redundancia gratis:
+
+```bash
+GROQ_API_KEY=...        # primario   — https://console.groq.com
+CEREBRAS_API_KEY=...    # secundario — https://cloud.cerebras.ai
+```
+
+Opcionalmente `GROQ_MODEL` / `CEREBRAS_MODEL` para pisar los modelos por defecto.
+
+No hay ninguna dependencia de la API de Gemini: su free tier quedó en ~5
+requests/día y el fallback pasó a exigir prepago. `GOOGLE_API_KEY` y
+`GOOGLE_API_KEY_PAID` ya no se usan y se pueden borrar del `.env`.
+
+⚠️ Las credenciales de **Gmail** (`GMAIL_*`) y **Drive** (`DRIVE_*`,
+`GOOGLE_DRIVE_ROOT_FOLDER_ID`) son otra cosa: son OAuth de Workspace, no de IA.
+Sin ellas no hay emails que leer ni dónde archivar. No tocarlas.
+
+Para verificar que las keys andan y que los modelos configurados existen:
+
+```bash
+python -m bot.llm_client
+```
+
 ---
 
 ## Día a día

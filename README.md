@@ -22,15 +22,30 @@ sudo apt install poppler-utils   # lo necesita pdf2image para el fallback visió
 ## Variables de entorno del LLM
 
 Las tareas automáticas (parseo de emails bancarios, categorización, matching de
-recurrentes) usan proveedores con free tier amplio, en cadena. Alcanza con
-configurar uno, pero con los dos hay redundancia gratis:
+recurrentes) usan proveedores con free tier permanente, en cadena. Hoy corre sólo
+con Groq; el segundo eslabón está cableado pero dormido, y se activa seteando la
+variable — no hace falta tocar código:
 
 ```bash
 GROQ_API_KEY=...        # primario   — https://console.groq.com
-CEREBRAS_API_KEY=...    # secundario — https://cloud.cerebras.ai
+OPENROUTER_API_KEY=...  # secundario — https://openrouter.ai  (opcional, hoy sin setear)
 ```
 
-Opcionalmente `GROQ_MODEL` / `CEREBRAS_MODEL` para pisar los modelos por defecto.
+Opcionalmente `GROQ_MODEL` / `OPENROUTER_MODEL` para pisar los modelos por defecto.
+
+Límites del free tier de Groq sobre `openai/gpt-oss-120b`: 30 req/min, 1.000
+req/día, 8.000 tokens/min, 200.000 tokens/día. El único que se puede llegar a
+tocar es el de tokens por minuto, si entra un lote grande de emails de golpe; da
+429, que es transitorio, así que esos emails quedan sin leer y se reprocesan en el
+ciclo siguiente.
+
+⚠️ Los proveedores dan de baja modelos sin aviso: Groq retiró toda la familia
+Llama 3.3 en agosto de 2026 y los pollers empezaron a fallar con 404. Si ves
+errores de parseo, correr `python -m bot.llm_client` para ver qué modelos siguen
+vivos y ajustar el default.
+
+Cerebras se descartó: en julio de 2026 cambió su free tier por un trial de USD 5
+que vence a los 30 días.
 
 No hay ninguna dependencia de la API de Gemini: su free tier quedó en ~5
 requests/día y el fallback pasó a exigir prepago. `GOOGLE_API_KEY` y

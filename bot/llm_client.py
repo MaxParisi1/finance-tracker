@@ -1,14 +1,14 @@
 """
 Cliente LLM para las tareas de extracción estructurada de los pollers.
 
-Cadena de proveedores gratuitos: Groq (primario) → Cerebras (secundario).
-Ambos exponen API compatible con OpenAI, así que se usan con el mismo SDK
-cambiando `base_url`.
+Cadena de proveedores gratuitos: Groq (primario) → OpenRouter (secundario, hoy
+sin key y por lo tanto inactivo). Ambos exponen API compatible con OpenAI, así
+que se usan con el mismo SDK cambiando `base_url`.
 
 Por qué no Gemini: su free tier quedó en ~5 requests/día y el fallback a una key
-paga ahora exige prepago (mínimo USD 10, con vencimiento a 12 meses). Dos free
-tiers independientes dan mucho más margen que cualquiera de los dos solo, y no
-requieren cargar plata por adelantado.
+paga ahora exige prepago (mínimo USD 10, con vencimiento a 12 meses). El criterio
+para elegir proveedor es ese: free tier permanente y sin tarjeta. Todo lo que sea
+"trial con créditos que vencen" es el mismo problema con otro nombre.
 
 Criterio de errores: si TODOS los proveedores fallan por una causa transitoria
 (cuota, red, 5xx), se levanta `LLMUnavailable`. El caller debe tratar eso como
@@ -71,11 +71,24 @@ PROVEEDORES: tuple[Proveedor, ...] = (
         base_url="https://api.groq.com/openai/v1",
         modelo_default="openai/gpt-oss-120b",
     ),
+    # Segundo eslabón, dormido a propósito: sin OPENROUTER_API_KEY se saltea solo
+    # (ver proveedores_configurados). Queda armado para que activarlo sea sacar la
+    # key y setear la variable, sin tocar código ni deployar.
+    #
+    # Los modelos `:free` dan 50 requests/día sin tarjeta — de sobra contra el
+    # puñado de llamadas al mes que hacen los pollers. Se elige gpt-oss-20b por ser
+    # el hermano chico del primario: mismo formato de salida sobre los mismos
+    # prompts. Si hiciera falta más músculo, `nvidia/nemotron-3-super-120b-a12b:free`
+    # también soporta response_format.
+    #
+    # Acá iba Cerebras: en julio de 2026 reemplazó su free tier por un trial de
+    # USD 5 que vence a los 30 días. Es el mismo prepago por el que dejamos Gemini,
+    # así que como red de contención no servía.
     Proveedor(
-        nombre="cerebras",
-        env_key="CEREBRAS_API_KEY",
-        base_url="https://api.cerebras.ai/v1",
-        modelo_default="llama-3.3-70b",
+        nombre="openrouter",
+        env_key="OPENROUTER_API_KEY",
+        base_url="https://openrouter.ai/api/v1",
+        modelo_default="openai/gpt-oss-20b:free",
     ),
 )
 

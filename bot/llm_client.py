@@ -62,11 +62,14 @@ class Proveedor:
 
 # El orden es el de preferencia. Groq primero por tener el límite diario más alto.
 PROVEEDORES: tuple[Proveedor, ...] = (
+    # Ojo: los proveedores dan de baja modelos sin aviso. Groq retiró toda la
+    # familia Llama 3.3 en agosto de 2026 y los pollers empezaron a comer 404.
+    # Si esto vuelve a pasar, `python -m bot.llm_client` lista los modelos vivos.
     Proveedor(
         nombre="groq",
         env_key="GROQ_API_KEY",
         base_url="https://api.groq.com/openai/v1",
-        modelo_default="llama-3.3-70b-versatile",
+        modelo_default="openai/gpt-oss-120b",
     ),
     Proveedor(
         nombre="cerebras",
@@ -105,6 +108,18 @@ def _es_transitorio(exc: Exception) -> bool:
     return False
 
 
+def _es_del_proveedor(exc: Exception) -> bool:
+    """
+    True si el problema es con ESTE proveedor, no con el pedido: modelo dado de
+    baja (404), key inválida o sin permisos (401/403).
+
+    Reintentar más tarde no lo arregla, pero otro proveedor sí puede responder,
+    así que no cortamos la cadena. Si no queda ninguno, el error se propaga tal
+    cual porque dice exactamente qué hay que ir a arreglar.
+    """
+    return isinstance(exc, APIStatusError) and exc.status_code in (401, 403, 404)
+
+
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
@@ -124,7 +139,10 @@ def generar_json(prompt: str, *, max_tokens: int = 1024) -> dict:
         LLMNoConfigurado: no hay ninguna API key seteada.
         LLMUnavailable:   todos los proveedores fallaron por causa transitoria,
                           o devolvieron algo que no es JSON válido.
-        Exception:        errores no transitorios se propagan tal cual.
+        APIStatusError:   401/403/404 en todos los proveedores — configuración
+                          rota (modelo dado de baja, key inválida). Se propaga
+                          sin disfrazar porque hay que ir a arreglarlo a mano.
+        Exception:        el resto de los errores no transitorios, tal cual.
     """
     disponibles = proveedores_configurados()
     if not disponibles:
@@ -134,6 +152,7 @@ def generar_json(prompt: str, *, max_tokens: int = 1024) -> dict:
         )
 
     ultimo_error: Exception | None = None
+    error_config: Exception | None = None
 
     for p in disponibles:
         try:
@@ -157,6 +176,13 @@ def generar_json(prompt: str, *, max_tokens: int = 1024) -> dict:
             ultimo_error = e
 
         except Exception as e:
+            if _es_del_proveedor(e):
+                # Config rota de este proveedor. Guardamos el error para propagarlo
+                # si nadie más responde: es accionable y no queremos disfrazarlo de
+                # "reintentá más tarde", porque solo, nunca se va a arreglar.
+                logger.error("LLM: %s mal configurado: %s", p.nombre, e)
+                error_config = e
+                continue
             if not _es_transitorio(e):
                 logger.error("LLM: %s falló con error no transitorio: %s", p.nombre, e)
                 raise
@@ -165,10 +191,13 @@ def generar_json(prompt: str, *, max_tokens: int = 1024) -> dict:
             )
             ultimo_error = e
 
+    if error_config is not None and ultimo_error is None:
+        raise error_config
+
     raise LLMUnavailable(
         f"Ningún proveedor pudo responder ({len(disponibles)} intentados). "
-        f"Último error: {ultimo_error}"
-    ) from ultimo_error
+        f"Último error: {ultimo_error or error_config}"
+    ) from (ultimo_error or error_config)
 
 
 # ──────────────────────────────────────────────

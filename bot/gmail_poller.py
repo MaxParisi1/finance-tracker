@@ -14,10 +14,12 @@ import re
 
 from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
 from bot.llm_client import LLMUnavailable, generar_json
-from bot.tools.gastos import guardar_gasto, historial_comercio
+from bot.tools.gastos import eliminar_gasto, guardar_gasto, historial_comercio
 from bot.tools.montos import parse_monto_ar
 from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
-from bot.db.queries import obtener_categorias_activas, existe_gasto_con_email
+from bot.db.queries import (
+    buscar_gasto_para_reverso, existe_gasto_con_email, obtener_categorias_activas,
+)
 from bot.tools import recurrentes_matcher as matcher
 
 logger = logging.getLogger(__name__)
@@ -44,10 +46,20 @@ _PRISMA_RE = re.compile(
 # Palabras que indican que la transacción fue rechazada y no debe registrarse
 _PRISMA_DENIED_KEYWORDS = ("denegad", "fallid", "no pudo ser procesad", "fue rechazad")
 
+# Un reverso anula un consumo que YA se registró: llega como un mail aparte
+# ("Aviso de Reverso"), con la misma estructura que el consumo, así que el regex
+# lo matchea igual y sin este filtro se guardaba como un segundo gasto.
+_PRISMA_REVERSO_KEYWORDS = ("revers", "devoluc", "anulac", "reintegr", "contracargo")
+
 
 def _is_prisma_denied(body: str) -> bool:
     lower = body.lower()
     return any(kw in lower for kw in _PRISMA_DENIED_KEYWORDS)
+
+
+def _es_prisma_reverso(body: str) -> bool:
+    lower = body.lower()
+    return any(kw in lower for kw in _PRISMA_REVERSO_KEYWORDS)
 
 
 def _parse_monto_argentino(raw: str) -> float:
@@ -91,6 +103,7 @@ def _parse_prisma_email(email: dict) -> dict | None:
         "comercio": comercio.strip().title(),
         "fecha": fecha,
         "sufijo": sufijo,
+        "_reverso": _es_prisma_reverso(body),
     }
 
 
@@ -269,6 +282,52 @@ async def _alertar_email_no_procesado(bot, chat_id: int, email: dict) -> None:
         logger.exception("No pude enviar alerta de email no procesado")
 
 
+async def _procesar_reverso(bot, chat_id: int, email: dict, parsed: dict) -> bool:
+    """
+    Anula el gasto que este reverso deja sin efecto. Devuelve True si se resolvió.
+
+    Si no aparece el consumo original NO se marca el mail como leído: puede que el
+    reverso se haya procesado antes que su consumo, y en el ciclo siguiente el
+    gasto ya va a estar. Es el mismo criterio que el resto del poller — el estado
+    "sin leer" de Gmail es la cola de reintentos.
+    """
+    original = await asyncio.to_thread(
+        buscar_gasto_para_reverso,
+        parsed["comercio"], parsed["monto"], parsed["sufijo"], parsed["fecha"],
+    )
+
+    if original is None:
+        logger.warning(
+            "Reverso de %s $%s sin consumo original; queda sin leer para reintentar",
+            parsed["comercio"], parsed["monto"],
+        )
+        if email["id"] not in _emails_alertados:
+            _emails_alertados.add(email["id"])
+            await _safe_alert(
+                bot, chat_id,
+                f"⚠️ *Reverso sin consumo asociado*\n"
+                f"• {_escape_md(parsed['comercio'])}\n"
+                f"• ${parsed['monto']:,.2f} · tarjeta {parsed['sufijo']}\n"
+                f"No encontré el gasto que anula. Lo reintento el próximo ciclo.",
+            )
+        return False
+
+    await asyncio.to_thread(eliminar_gasto, original["id"])
+    await asyncio.to_thread(mark_as_read, email["id"])
+    logger.info(
+        "Reverso aplicado: gasto %s (%s $%s) anulado",
+        original["id"], parsed["comercio"], parsed["monto"],
+    )
+    await _safe_alert(
+        bot, chat_id,
+        f"↩️ *Reverso registrado*\n"
+        f"• {_escape_md(parsed['comercio'])}\n"
+        f"• ${parsed['monto']:,.2f} · tarjeta {parsed['sufijo']}\n"
+        f"Anulé el gasto original: no se cobró.",
+    )
+    return True
+
+
 async def poll_gmail_once(bot, chat_id: int) -> bool:
     """
     Revisa la etiqueta Consumos (emails genéricos) y procesa los nuevos.
@@ -344,6 +403,11 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
         logger.exception("Error al consultar Gmail (Consumos_visa)")
         return False
 
+    # Un consumo y su reverso suelen llegar en el mismo lote. Procesando los
+    # reversos al final, el consumo que anulan ya está guardado y lo encuentran
+    # en la misma pasada, en vez de esperar al ciclo siguiente.
+    emails.sort(key=lambda e: _es_prisma_reverso(e.get("body", "")))
+
     for email in emails:
         try:
             # Idempotencia: si este email ya generó un gasto, solo marcar leído.
@@ -375,6 +439,10 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
             if parsed.get("_denied"):
                 # Transacción denegada: marcar como leído y seguir
                 await asyncio.to_thread(mark_as_read, email["id"])
+                continue
+
+            if parsed.get("_reverso"):
+                await _procesar_reverso(bot, chat_id, email, parsed)
                 continue
 
             sufijo = parsed["sufijo"]

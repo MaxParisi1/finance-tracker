@@ -121,6 +121,40 @@ def eliminar_gasto(gasto_id: str) -> bool:
     return True
 
 
+def buscar_gasto_para_reverso(
+    comercio: str, monto: float, sufijo: str, fecha: str, dias: int = 30
+) -> dict | None:
+    """
+    Encuentra el gasto que un reverso de Prisma viene a anular.
+
+    Un reverso llega como un mail aparte, con su propio message_id, así que la
+    idempotencia por email no lo detecta: hay que reconocer el consumo original
+    por sus datos. Se exige coincidencia exacta de comercio, monto y tarjeta —
+    tres campos juntos no colisionan por casualidad— y cercanía en la fecha.
+
+    Devuelve el más reciente que califique, o None si no hay ninguno (puede
+    pasar si el reverso se procesa antes que su consumo).
+    """
+    from datetime import date as _date, timedelta as _timedelta
+
+    d = _date.fromisoformat(fecha)
+    client = get_client()
+    res = (
+        client.table("gastos")
+        .select("*")
+        .eq("comercio", comercio)
+        .eq("monto_original", monto)
+        .ilike("tarjeta", f"%{sufijo}")
+        .gte("fecha", (d - _timedelta(days=dias)).isoformat())
+        .lte("fecha", (d + _timedelta(days=dias)).isoformat())
+        .is_("deleted_at", "null")
+        .order("fecha", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
 # ──────────────────────────────────────────────
 # Gastos recurrentes
 # ──────────────────────────────────────────────

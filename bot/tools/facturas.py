@@ -213,20 +213,26 @@ def _parse_personal(email: dict) -> FacturaParseada:
     )
 
 
+# Solo href: el mismo bucket sirve también el logo del mail vía <img src>, así que
+# buscar el dominio suelto da positivo en CUALQUIER mail del consorcio.
+_RE_PDF_EXPENSAS = re.compile(
+    r"href=[\"'](https://simplesolutionscloud\.s3\.[\w.\-]+/[\w/\-]+)",
+    re.IGNORECASE,
+)
+
+
+def _urls_pdf_expensas(html: str) -> tuple[str, ...]:
+    """Los links a los PDFs de expensas, sin duplicados y en orden de aparición."""
+    return tuple(dict.fromkeys(_RE_PDF_EXPENSAS.findall(html)))
+
+
 def _parse_consorcio_gallo(email: dict) -> FacturaParseada:
     """
     Expensas: el mail no trae monto ni vencimiento, solo links a los PDFs en S3
     (públicos, sin auth). Este parser devuelve la factura *incompleta* con las
     URLs; el monto sale de expensas_pdf.parsear_unidades().
     """
-    # Solo href: el mismo bucket sirve también el logo del mail vía <img src>.
-    urls = tuple(dict.fromkeys(
-        re.findall(
-            r"href=[\"'](https://simplesolutionscloud\.s3\.[\w.\-]+/[\w/\-]+)",
-            email.get("html", ""),
-            re.IGNORECASE,
-        )
-    ))
+    urls = _urls_pdf_expensas(email.get("html", ""))
     if not urls:
         raise FacturaNoParseable("no encontré los links a los PDFs de expensas")
     raise FacturaIncompleta(urls)
@@ -243,12 +249,38 @@ _MARCADORES: dict[str, tuple[str, ...]] = {
     "metrogas":        ("número de cliente", "numero de cliente", "período de liquidación"),
     "aysa":            ("factura n", "importe", "cuenta:"),
     "personal":        ("saldo total es", "referente de pago"),
-    "consorcio_gallo": ("simplesolutionscloud.s3", "expensa"),
+}
+
+
+def _es_aviso_expensas(email: dict) -> bool:
+    """
+    El consorcio manda avisos de todo (cortes de agua, ascensor) con el mismo
+    template, y el logo de ese template sale del MISMO bucket S3 que los PDFs de
+    expensas. Por eso el marcador "simplesolutionscloud.s3" daba positivo en todos:
+    alcanzaba con que el mail trajera el logo, y después el parser no encontraba
+    ningún href y alertaba como si el formato se hubiera roto.
+
+    Se exige entonces lo mismo que el parser necesita —un href al bucket— o que el
+    asunto hable de expensas ("EXPENSA JULIO 2026"). Son dos señales independientes:
+    si el bucket cambia de dominio, el asunto sigue salvando el mail, y viceversa.
+    """
+    if _urls_pdf_expensas(email.get("html", "")):
+        return True
+    return "expensa" in email.get("subject", "").lower()
+
+
+# Servicios cuyo "¿es un aviso de factura?" no se resuelve con substrings sueltos.
+_PREDICADOS = {
+    "consorcio_gallo": _es_aviso_expensas,
 }
 
 
 def _es_aviso_de_factura(slug: str, email: dict) -> bool:
     """True si el mail parece un aviso de factura y no otra cosa del mismo emisor."""
+    predicado = _PREDICADOS.get(slug)
+    if predicado:
+        return predicado(email)
+
     marcadores = _MARCADORES.get(slug)
     if not marcadores:
         return True  # servicio sin marcadores definidos: no filtramos nada

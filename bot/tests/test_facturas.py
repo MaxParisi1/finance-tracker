@@ -323,3 +323,26 @@ def test_ante_la_duda_se_procesa_y_falla_ruidosamente():
                "subject": "Novedades", "texto": "TOTAL A PAGAR proximamente", "html": ""}
     with pytest.raises(FacturaNoParseable):
         parsear_email(ambiguo)
+
+
+@pytest.mark.unit
+def test_aviso_del_consorcio_no_es_factura():
+    """
+    Regresión: el logo del mail del consorcio vive en el MISMO bucket S3 que los
+    PDFs de expensas, así que el marcador por substring daba positivo en cualquier
+    aviso (ascensor, cortes de agua). El mail entraba al parser, no encontraba
+    ningún href y alertaba cada 15 minutos como si el formato se hubiera roto.
+
+    Fixture real: "Aviso: Ascensor de servicio" — trae el logo del bucket y ni un
+    solo href a un PDF.
+    """
+    with pytest.raises(FacturaIrrelevante):
+        parsear_email(cargar("consorcio_gallo_aviso"))
+
+
+@pytest.mark.unit
+def test_expensas_reales_siguen_pasando_el_filtro():
+    """La contracara: el mail de expensas de verdad no puede quedar afuera."""
+    with pytest.raises(FacturaIncompleta) as exc:
+        parsear_email(cargar("consorcio_gallo"))
+    assert exc.value.pdf_urls, "tienen que salir los links a los PDFs"

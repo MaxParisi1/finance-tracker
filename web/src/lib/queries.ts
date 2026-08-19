@@ -515,6 +515,7 @@ export interface FijoDelMes {
   con_comprobante: boolean
   dias_para_vencimiento: number
   siguiente_pagado: boolean // mensual: el mes siguiente ya tiene un pago mapeado (adelanto hecho)
+  desde_factura: boolean    // monto y vencimiento vienen de la factura del mes, no de la estimación
 }
 
 export interface FijosDelMes {
@@ -627,6 +628,25 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
     const dia = r.dia_del_mes ?? 1
     return (pagosPorRec.get(r.id) ?? []).some(g => mesDelPagoMensual(g.fecha, dia) === keyMesSig)
   }
+  // Facturas cuyo vencimiento cae en el mes. Son la autoridad sobre el monto: es
+  // lo que el proveedor emitió, contra `monto_original`, que es lo que se pagó la
+  // última vez y sólo se actualiza al vincular un pago. Sin esto, Fijos mostraba
+  // el importe del mes anterior hasta que pagabas.
+  const facturaPorRec = new Map<string, { monto: number; vencimiento: string }>()
+  const { data: facturasMes } = await supabase
+    .from('facturas')
+    .select('monto, vencimiento, servicios!inner(recurrente_id)')
+    .gte('vencimiento', `${anio}-${pad2(mes)}-01`)
+    .lt('vencimiento', `${nextAnio}-${pad2(nextMes)}-01`)
+  for (const f of facturasMes ?? []) {
+    const recId = (f.servicios as unknown as { recurrente_id: string | null })?.recurrente_id
+    if (!recId) continue
+    // Si un servicio emitió más de una en el mes, gana la que vence primero.
+    const previa = facturaPorRec.get(recId)
+    if (previa && previa.vencimiento <= f.vencimiento) continue
+    facturaPorRec.set(recId, { monto: Number(f.monto), vencimiento: f.vencimiento })
+  }
+
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
   const diasHasta = (fecha: string) => Math.round((new Date(fecha + 'T00:00:00').getTime() - hoy.getTime()) / DAY)
 
@@ -666,21 +686,30 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       proximo_vencimiento: r.proximo_vencimiento,
     }
 
-    const sinDia = r.dia_del_mes == null && (r.frecuencia === 'mensual' || r.frecuencia === 'anual')
-    const dias = sinDia ? 999 : diasHasta(occ)
+    const sinDiaNominal = r.dia_del_mes == null && (r.frecuencia === 'mensual' || r.frecuencia === 'anual')
 
+    // Con factura del mes tenemos fecha exacta: deja de ser un fijo "sin día".
+    const fact = facturaPorRec.get(r.id)
+    const sinDia = fact ? false : sinDiaNominal
+    const venc = fact ? fact.vencimiento : occ
+    const dias = fact ? diasHasta(fact.vencimiento) : (sinDiaNominal ? 999 : diasHasta(occ))
+
+    // El matching de pagos sigue usando `occ`: la ventana nominal es la que mapea
+    // un pago a su mes, y cambiarla acá movería fijos ya saldados de lugar.
     const pago = pagoDelMes(r, occ)
     if (pago) {
       const f: FijoDelMes = {
         ...base,
-        vencimiento: occ,
+        vencimiento: venc,
         sin_dia: sinDia,
+        // Pagado: manda lo que efectivamente pagaste, no lo que decía la factura.
         monto_ars: pago.monto_ars || toARS(r.monto_original, r.moneda),
         pagado: true,
         fecha_pago: pago.fecha,
         con_comprobante: false,
         dias_para_vencimiento: dias,
         siguiente_pagado: siguientePagado(r),
+        desde_factura: !!fact,
       }
       pagados.push(f)
       comprobantePend.push({ f, gasto_id: pago.gasto_id })
@@ -688,16 +717,17 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       // Si el fijo se creó después de la ocurrencia, no lo debías ese mes.
       const creado = (r.created_at ?? '').split('T')[0]
       if (creado) {
-        if (sinDia) { if (creado.slice(0, 7) > keyMes) continue }
+        if (sinDiaNominal) { if (creado.slice(0, 7) > keyMes) continue }
         else if (occ < creado) continue
       }
       pendientes.push({
         ...base,
-        vencimiento: occ,
+        vencimiento: venc,
         sin_dia: sinDia,
-        monto_ars: toARS(r.monto_original, r.moneda),
+        monto_ars: fact ? fact.monto : toARS(r.monto_original, r.moneda),
         pagado: false,
         con_comprobante: false,
+        desde_factura: !!fact,
         dias_para_vencimiento: dias,
         siguiente_pagado: false,
       })

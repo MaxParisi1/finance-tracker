@@ -1125,9 +1125,17 @@ export async function getRegistro(anio: number): Promise<Registro> {
   const total_celdas = filas.reduce((n, f) => n + f.esperadas, 0)
   const celdas_completas = filas.reduce((n, f) => n + f.completas, 0)
 
+  // Los meses futuros se ocultan para no mostrar columnas vacías, pero un mes con
+  // factura ya emitida no es futuro para el registro: el aviso llegó y el PDF
+  // puede estar archivado. Sin esto, una factura de septiembre cargada en agosto
+  // quedaba invisible hasta que cambiara el mes.
+  const conFacturas = new Set(filas.flatMap(f => Object.keys(f.celdas)))
+
   return {
     anio,
-    meses: meses.filter(m => anio < hoy.getFullYear() || m <= mesActual),
+    meses: meses.filter(
+      m => anio < hoy.getFullYear() || m <= mesActual || conFacturas.has(m),
+    ),
     filas,
     total_celdas,
     celdas_completas,

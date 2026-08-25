@@ -6,6 +6,11 @@ Contrato de fallos, deliberado: un mail solo se marca como leído cuando quedó
 resuelto (registrado o duplicado conocido). Cualquier otra cosa lo deja sin leer
 y manda un aviso por Telegram, así el próximo ciclo lo reintenta y nunca se
 pierde una factura en silencio.
+
+Única excepción, también deliberada: si falla la descarga del PDF adjunto el
+mail SÍ se marca leído. Para entonces el importe ya está guardado, que es el
+dato caro; reintentar un flujo de descarga roto alertaría en cada ciclo para
+siempre, y el repaso semanal de documentación ya reclama lo que falte archivar.
 """
 
 import asyncio
@@ -48,11 +53,16 @@ def _a_texto(html: str) -> str:
 def _como_email_parseable(email: dict) -> dict:
     """Adapta el dict de gmail_reader al que esperan los parsers."""
     html = email.get("html") or ""
+    plano = email.get("body", "")
     return {
         "from": email.get("from", ""),
         "subject": email.get("subject", ""),
         "html": html,
-        "texto": _a_texto(html) if html else email.get("body", ""),
+        "texto": _a_texto(html) if html else plano,
+        # La parte text/plain sin tocar. No es lo mismo que `texto`: cuando hay
+        # HTML, `texto` sale de convertirlo, y ahí se pierde todo lo que viva
+        # solo en el text/plain — como el link de descarga de Personal.
+        "plano": plano,
         "remitentes_alternativos": email.get("remitentes_alternativos", []),
     }
 
@@ -157,13 +167,93 @@ def resolver_expensas(urls: tuple[str, ...]) -> FacturaParseada:
     )
 
 
-def _resumen(factura: FacturaParseada, nombre: str) -> str:
-    return (
-        f"\U0001f9fe *Factura registrada*\n"
-        f"• *{escapar_md(nombre)}*\n"
-        f"• ${formatear_monto_ar(factura.monto)}\n"
-        f"• Vence: {factura.vencimiento}"
+def descargar_factura_personal(url: str, monto: float) -> bytes:
+    """
+    Los dos saltos de Personal más la verificación de que el PDF sea el de esta
+    factura. Cualquier fallo sale como PersonalPdfNoDisponible para que el caller
+    no tenga que distinguir en cuál de los pasos se rompió.
+    """
+    from bot.tools.personal_pdf import (
+        PersonalPdfNoDisponible, resolver_url_pdf, verificar_monto,
     )
+
+    try:
+        pdf = descargar_pdf(resolver_url_pdf(url))
+    except PersonalPdfNoDisponible:
+        raise
+    except Exception as exc:
+        raise PersonalPdfNoDisponible(f"falló la descarga: {exc}") from exc
+
+    verificar_monto(pdf, monto)
+    return pdf
+
+
+def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict) -> dict:
+    """
+    Baja el PDF que enlaza el mail y lo cuelga de la factura recién registrada,
+    con la misma estructura de carpetas que usa el archivado por Telegram.
+
+    Hoy el único servicio que enlaza un PDF descargable es Personal; los demás
+    solo enlazan su portal con login. Si mañana se suma otro, acá va el ruteo.
+    """
+    from bot.tools.archivado import subir_a_drive
+
+    servicio = queries.obtener_servicio_por_slug(parseada.servicio)
+    if servicio is None:
+        raise ServicioDesconocido(f"el servicio {parseada.servicio!r} no está registrado")
+
+    pdf = descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
+    subido = subir_a_drive(pdf, "application/pdf", servicio["nombre"],
+                           "factura", parseada.vencimiento)
+
+    return queries.insertar_archivo_drive({
+        "tipo": "factura",
+        "comercio": servicio["nombre"],
+        "fecha": parseada.vencimiento.isoformat(),
+        "categoria": None,
+        "monto": parseada.monto,
+        "moneda": "ARS",
+        "drive_file_id": subido["file_id"],
+        "drive_file_name": subido["file_name"],
+        "drive_web_view_link": subido["web_view_link"],
+        "drive_folder_path": subido["folder_path"],
+        "mime_type": "application/pdf",
+        "factura_id": factura["id"],
+        "gasto_id": None,
+    })
+
+
+async def _avisar_pdf_no_archivado(bot, chat_id: int, parseada: FacturaParseada,
+                                   exc: Exception) -> None:
+    """
+    Aviso suave: la factura SÍ quedó registrada, solo falta el documento.
+
+    No usa alertar_error a propósito: ese formato cierra con "nada se guardó",
+    que acá sería mentira y te haría revisar algo que está bien.
+    """
+    detalle = str(exc)[:200]
+    texto = (
+        f"\U0001f4ce *No pude bajar el PDF de {escapar_md(parseada.servicio)}*\n"
+        f"La factura quedó registrada igual; solo falta el documento.\n"
+        f"Mandámelo por acá cuando puedas.\n"
+        f"• Detalle: {escapar_md(detalle)}"
+    )
+    try:
+        await bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
+    except Exception:
+        logger.exception("No pude avisar que faltó el PDF")
+
+
+def _resumen(factura: FacturaParseada, nombre: str, archivada: bool = False) -> str:
+    lineas = [
+        "\U0001f9fe *Factura registrada*",
+        f"• *{escapar_md(nombre)}*",
+        f"• ${formatear_monto_ar(factura.monto)}",
+        f"• Vence: {factura.vencimiento}",
+    ]
+    if archivada:
+        lineas.append("• \U0001f4ce PDF archivado en Drive")
+    return "\n".join(lineas)
 
 
 async def procesar_email_factura(bot, chat_id: int, email: dict) -> bool:
@@ -236,10 +326,23 @@ async def procesar_email_factura(bot, chat_id: int, email: dict) -> bool:
         logger.info("Factura de %s ya estaba registrada; mail marcado leído", parseada.servicio)
         return True
 
+    # El PDF es opcional: la factura ya está guardada, así que un fallo acá se
+    # avisa pero NO deja el mail sin leer. Si lo reintentáramos, un flujo de
+    # descarga roto alertaría en cada ciclo para siempre; el repaso de los lunes
+    # ya reclama la documentación faltante, que es la cadencia correcta.
+    archivada = False
+    if parseada.pdf_urls:
+        try:
+            await asyncio.to_thread(archivar_pdf_de_factura, parseada, resultado.factura)
+            archivada = True
+        except Exception as exc:
+            logger.warning("No pude archivar el PDF de %s: %s", parseada.servicio, exc)
+            await _avisar_pdf_no_archivado(bot, chat_id, parseada, exc)
+
     servicio = resultado.factura.get("servicios") or {}
     nombre = servicio.get("nombre") or parseada.servicio
     try:
-        await bot.send_message(chat_id=chat_id, text=_resumen(parseada, nombre),
+        await bot.send_message(chat_id=chat_id, text=_resumen(parseada, nombre, archivada),
                                parse_mode="Markdown")
     except Exception:
         # La factura ya está guardada: no avisar es molesto, no grave.

@@ -196,6 +196,21 @@ def _parse_aysa(email: dict) -> FacturaParseada:
     )
 
 
+# El link con token que sirve el PDF sin login. Vive SOLO en la parte text/plain
+# del mail —en el HTML el botón apunta al redirector de tracking de Personal—,
+# así que se busca en `plano` y no en el texto derivado del HTML.
+_RE_PDF_PERSONAL = re.compile(
+    r"https://tufactura\.personal\.com\.ar/facdigital-web/Consulta\?q=[^\s\"'<>]+",
+    re.IGNORECASE,
+)
+
+
+def _urls_factura_personal(email: dict) -> tuple[str, ...]:
+    """Los links de descarga del PDF, sin duplicados y en orden de aparición."""
+    fuente = email.get("plano") or email.get("texto", "")
+    return tuple(dict.fromkeys(_RE_PDF_PERSONAL.findall(fuente)))
+
+
 def _parse_personal(email: dict) -> FacturaParseada:
     # Personal pone monto y vencimiento en el asunto: es la fuente más estable,
     # inmune a cualquier rediseño del cuerpo del mail.
@@ -205,11 +220,14 @@ def _parse_personal(email: dict) -> FacturaParseada:
         asunto, "saldo y vencimiento en el asunto",
     )
     ref = _buscar(r"Referente de pago\s*\n\s*(\d{10,20})", email["texto"], "referente de pago")
+    # El PDF es un extra: si el link no está, la factura se registra igual y el
+    # repaso de los lunes se encarga de reclamar el documento.
     return FacturaParseada(
         servicio="personal",
         identificador=_norm_id(ref.group(1)),
         monto=_monto(m.group(1)),
         vencimiento=_fecha(m.group(2)),
+        pdf_urls=_urls_factura_personal(email),
     )
 
 

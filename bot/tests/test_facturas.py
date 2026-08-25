@@ -58,6 +58,7 @@ def cargar(nombre: str) -> dict:
         "subject": msg.get("Subject", ""),
         "html": html,
         "texto": _a_texto(html) if html else plano,
+        "plano": plano,
     }
 
 
@@ -249,6 +250,44 @@ def test_slug_explicito_saltea_el_ruteo_por_remitente():
 def test_slug_inexistente_falla_claro():
     with pytest.raises(FacturaNoParseable, match="no hay parser"):
         parsear_email(cargar("edenor"), slug="inventado")
+
+
+@pytest.mark.unit
+def test_personal_trae_el_link_de_descarga_del_pdf():
+    """
+    Es el único de los cuatro servicios cuyo mail permite bajar el PDF sin login.
+    Se lo lleva en pdf_urls para que el poller lo archive solo.
+    """
+    urls = parsear_email(cargar("personal")).pdf_urls
+    assert len(urls) == 1
+    assert urls[0].startswith("https://tufactura.personal.com.ar/facdigital-web/Consulta?q=")
+
+
+@pytest.mark.unit
+def test_el_link_de_personal_vive_solo_en_el_text_plain():
+    """
+    En el HTML el botón apunta al redirector de tracking, así que si el parser
+    mirara `texto` (derivado del HTML) se quedaría sin link y en silencio.
+    """
+    email = cargar("personal")
+    assert "tufactura.personal.com.ar" not in email["html"]
+    assert "tufactura.personal.com.ar" in email["plano"]
+
+
+@pytest.mark.unit
+def test_sin_link_la_factura_se_registra_igual():
+    """El PDF es un extra: su ausencia no puede costar el registro del importe."""
+    f = parsear_email(cargar("personal") | {"plano": ""})
+    assert f.pdf_urls == ()
+    assert f.monto == pytest.approx(67894.40)
+    assert f.vencimiento == date(2026, 8, 4)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fixture", ["edenor", "metrogas", "aysa"])
+def test_los_otros_servicios_no_traen_pdf_descargable(fixture):
+    """Sus mails solo enlazan el portal con login: esos PDFs entran a mano."""
+    assert parsear_email(cargar(fixture)).pdf_urls == ()
 
 
 @pytest.mark.unit

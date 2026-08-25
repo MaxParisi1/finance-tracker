@@ -13,7 +13,8 @@ from unittest.mock import patch
 import pytest
 
 from bot.facturas_poller import (
-    descargar_pdf, poll_facturas_once, procesar_email_factura, resolver_expensas,
+    descargar_factura_personal, descargar_pdf, poll_facturas_once,
+    procesar_email_factura, resolver_expensas,
 )
 from bot.tools.alertas import resetear_dedup
 from bot.tools.expensas_pdf import ExpensasNoParseable, FilaUnidad
@@ -399,3 +400,85 @@ def test_un_formato_cambiado_si_alerta_y_no_se_marca_leido():
 
     ctx.marcar.assert_not_called()
     assert len(bot.mensajes) == 1
+
+
+# ──────────────────────────────────────────────
+# PDF de la factura (Personal)
+# ──────────────────────────────────────────────
+
+PERSONAL = FacturaParseada(
+    servicio="personal", identificador="8100682932410002",
+    monto=72711.49, vencimiento=date(2026, 9, 3),
+    pdf_urls=("https://tufactura.personal.com.ar/facdigital-web/Consulta?q=TOKEN",),
+)
+
+
+@pytest.mark.unit
+def test_el_pdf_se_archiva_y_se_avisa_en_el_resumen():
+    bot = BotFalso()
+    with Ctx(parsear=PERSONAL) as ctx:
+        with patch("bot.facturas_poller.archivar_pdf_de_factura",
+                   return_value={"id": "arch-1"}) as archivar:
+            assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    archivar.assert_called_once()
+    assert archivar.call_args[0][1] == {"id": "fac-1"}  # se cuelga de la factura recién creada
+    ctx.marcar.assert_called_once_with("msg-1")
+    assert "PDF archivado" in bot.mensajes[0]["text"]
+
+
+@pytest.mark.unit
+def test_si_falla_el_pdf_la_factura_igual_queda_registrada_y_el_mail_leido():
+    """
+    El invariante del poller es "no marcar leído si algo falló", pero el PDF es
+    la excepción deliberada: la factura ya está guardada y reintentar un flujo de
+    descarga roto alertaría en cada ciclo para siempre. Lo faltante lo reclama el
+    repaso semanal de documentación.
+    """
+    bot = BotFalso()
+    with Ctx(parsear=PERSONAL) as ctx:
+        with patch("bot.facturas_poller.archivar_pdf_de_factura",
+                   side_effect=ConnectionError("tufactura no responde")):
+            assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    ctx.marcar.assert_called_once_with("msg-1")
+    assert len(bot.mensajes) == 2
+    assert "No pude bajar el PDF" in bot.mensajes[0]["text"]
+    assert "registrada igual" in bot.mensajes[0]["text"]
+    # El aviso NO puede decir que no se guardó nada: la factura sí se guardó.
+    assert "Nada se guardó" not in bot.mensajes[0]["text"]
+    assert "PDF archivado" not in bot.mensajes[1]["text"]
+
+
+@pytest.mark.unit
+def test_una_factura_sin_link_no_intenta_descargar_nada():
+    bot = BotFalso()
+    with Ctx():  # PARSEADA es de edenor, sin pdf_urls
+        with patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
+            assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    archivar.assert_not_called()
+    assert "PDF archivado" not in bot.mensajes[0]["text"]
+
+
+@pytest.mark.unit
+def test_una_factura_ya_registrada_no_vuelve_a_archivar_el_pdf():
+    """Evita un duplicado en Drive si el mail se reprocesa."""
+    bot = BotFalso()
+    ya = ResultadoRegistro(factura={"id": "fac-1"}, ya_existia=True)
+    with Ctx(parsear=PERSONAL, registrar=ya):
+        with patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
+            assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    archivar.assert_not_called()
+
+
+@pytest.mark.unit
+def test_cualquier_error_de_descarga_sale_como_pdf_no_disponible():
+    """El caller no tiene que distinguir en cuál de los dos saltos se rompió."""
+    from bot.tools.personal_pdf import PersonalPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf", side_effect=OSError("DNS")):
+        with patch("bot.tools.personal_pdf.resolver_url_pdf", return_value="https://x/y.pdf"):
+            with pytest.raises(PersonalPdfNoDisponible, match="falló la descarga"):
+                descargar_factura_personal("https://tufactura.personal.com.ar/a", 1.0)

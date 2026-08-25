@@ -25,7 +25,7 @@ from bot.tools.drive_manager import get_drive_manager
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ResultadoArchivado", "archivar_documento"]
+__all__ = ["ResultadoArchivado", "archivar_documento", "subir_a_drive"]
 
 _EXTENSIONES = {
     "application/pdf": "pdf",
@@ -49,8 +49,8 @@ def _extension(mime: str) -> str:
     return _EXTENSIONES.get(mime, "pdf")
 
 
-def _subir_a_drive(pdf_bytes: bytes, mime: str, nombre_servicio: str,
-                   tipo: str, fecha: date) -> dict:
+def subir_a_drive(pdf_bytes: bytes, mime: str, nombre_servicio: str,
+                  tipo: str, fecha: date) -> dict:
     """Sube a Drive con la estructura Comercio/Año/Mes que ya usa el resto."""
     dm = get_drive_manager()
     filename = dm.generate_filename(fecha, nombre_servicio, tipo, _extension(mime))
@@ -124,7 +124,7 @@ def archivar_documento(
         except ValueError:
             pass
 
-    subido = _subir_a_drive(pdf_bytes, mime_type, servicio["nombre"], doc.tipo, fecha)
+    subido = subir_a_drive(pdf_bytes, mime_type, servicio["nombre"], doc.tipo, fecha)
 
     gasto = None
     if doc.tipo == TIPO_COMPROBANTE and factura and factura.get("estado") == "pendiente":

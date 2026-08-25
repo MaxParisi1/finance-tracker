@@ -48,7 +48,7 @@ class Entorno:
             patch("bot.tools.archivado.queries.vincular_gasto_recurrente"),
             patch("bot.tools.archivado.queries.insertar_archivo_drive",
                   side_effect=lambda fila: {"id": "arch-1", **fila}),
-            patch("bot.tools.archivado._subir_a_drive", return_value=SUBIDO),
+            patch("bot.tools.archivado.subir_a_drive", return_value=SUBIDO),
             patch("bot.tools.gastos.guardar_gasto",
                   return_value={"id": "gasto-1", "monto_original": 30562.17}),
         ]

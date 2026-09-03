@@ -7,8 +7,10 @@ mail devuelve un HTML de ~4 KB que dice "Descargando..." y salta a la URL real
 por JavaScript. No hace falta un navegador: alcanza con leer el location.replace().
 
 AySA y Edenor también se automatizan, cada uno con su propio flujo (ver
-aysa_pdf.py y edenor_pdf.py). MetroGAS solo enlaza su portal con login, así que
-ese PDF sigue entrando a mano por Telegram.
+aysa_pdf.py y edenor_pdf.py). MetroGAS es el único que no: su portal es público
+—no pide login— pero el endpoint del PDF valida un reCAPTCHA del lado del
+servidor (devuelve 401 RECAPTCHA-NOT-VALID), así que ese PDF sigue entrando a
+mano por Telegram y no hay nada que investigar ahí.
 
 Esto es scraping de un flujo que Telecom no documenta y puede cambiar sin aviso,
 así que la regla es fallar ruidosamente: si el HTML intermedio no trae el salto,

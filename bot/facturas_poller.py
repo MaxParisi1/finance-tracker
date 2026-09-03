@@ -240,8 +240,9 @@ def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     Baja el PDF con el flujo del servicio que corresponda.
 
     Personal, AySA y Edenor enlazan el PDF con un token que no pide login, cada
-    uno con su flujo. MetroGAS solo enlaza su portal, así que ese sigue entrando
-    a mano por Telegram. Si mañana se suma otro, acá va el ruteo.
+    uno con su flujo. MetroGAS no se puede: su portal es público pero el endpoint
+    del PDF valida un reCAPTCHA en el servidor, así que ese sigue entrando a mano
+    por Telegram. Si mañana se suma otro, acá va el ruteo.
     """
     if parseada.servicio == "personal":
         return descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)

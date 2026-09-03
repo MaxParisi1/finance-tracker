@@ -188,13 +188,52 @@ def descargar_factura_personal(url: str, monto: float) -> bytes:
     return pdf
 
 
+def descargar_factura_aysa(url: str, nro_factura: str | None, monto: float) -> bytes:
+    """
+    La cadena de redirecciones de AySA más la verificación de que el PDF sea el
+    de esta factura. Cualquier fallo sale como AysaPdfNoDisponible para que el
+    caller no tenga que distinguir en cuál de los pasos se rompió.
+    """
+    from bot.tools.aysa_pdf import (
+        AysaPdfNoDisponible, resolver_url_pdf, verificar_factura,
+    )
+
+    try:
+        pdf = descargar_pdf(resolver_url_pdf(url))
+    except AysaPdfNoDisponible:
+        raise
+    except Exception as exc:
+        raise AysaPdfNoDisponible(f"falló la descarga: {exc}") from exc
+
+    verificar_factura(pdf, nro_factura, monto)
+    return pdf
+
+
+def pdf_de_factura(parseada: FacturaParseada) -> bytes:
+    """
+    Baja el PDF con el flujo del servicio que corresponda.
+
+    Personal y AySA enlazan el PDF con un token que no pide login; Edenor y
+    MetroGAS solo enlazan su portal, así que esos dos siguen entrando a mano por
+    Telegram. Si mañana se suma otro, acá va el ruteo.
+    """
+    if parseada.servicio == "personal":
+        return descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
+    if parseada.servicio == "aysa":
+        return descargar_factura_aysa(parseada.pdf_urls[0], parseada.nro_factura,
+                                      parseada.monto)
+    raise ValueError(
+        f"el servicio {parseada.servicio!r} trae link al PDF pero no tiene "
+        f"descarga automática implementada"
+    )
+
+
 def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict) -> dict:
     """
     Baja el PDF que enlaza el mail y lo cuelga de la factura recién registrada,
     con la misma estructura de carpetas que usa el archivado por Telegram.
 
-    Hoy el único servicio que enlaza un PDF descargable es Personal; los demás
-    solo enlazan su portal con login. Si mañana se suma otro, acá va el ruteo.
+    Qué servicio se puede bajar solo lo decide pdf_de_factura().
     """
     from bot.tools.archivado import subir_a_drive
 
@@ -202,7 +241,7 @@ def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict) -> dict:
     if servicio is None:
         raise ServicioDesconocido(f"el servicio {parseada.servicio!r} no está registrado")
 
-    pdf = descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
+    pdf = pdf_de_factura(parseada)
     subido = subir_a_drive(pdf, "application/pdf", servicio["nombre"],
                            "factura", parseada.vencimiento)
 

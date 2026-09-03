@@ -6,9 +6,9 @@ así en su propio tracking: "factura sin login"— pero en dos saltos. La URL de
 mail devuelve un HTML de ~4 KB que dice "Descargando..." y salta a la URL real
 por JavaScript. No hace falta un navegador: alcanza con leer el location.replace().
 
-Es de los cuatro servicios el único que se puede automatizar. Edenor, AySA y
-MetroGAS solo enlazan su portal con login, así que esos PDFs siguen entrando a
-mano por Telegram.
+AySA también se automatiza, con otro flujo (ver aysa_pdf.py). Edenor y MetroGAS
+solo enlazan su portal con login, así que esos PDFs siguen entrando a mano por
+Telegram.
 
 Esto es scraping de un flujo que Telecom no documenta y puede cambiar sin aviso,
 así que la regla es fallar ruidosamente: si el HTML intermedio no trae el salto,

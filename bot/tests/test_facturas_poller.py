@@ -7,14 +7,15 @@ factura se pierde en silencio, que es el modo de falla más caro de todos.
 """
 
 import asyncio
+from dataclasses import replace
 from datetime import date
 from unittest.mock import patch
 
 import pytest
 
 from bot.facturas_poller import (
-    descargar_factura_personal, descargar_pdf, poll_facturas_once,
-    procesar_email_factura, resolver_expensas,
+    descargar_factura_aysa, descargar_factura_personal, descargar_pdf,
+    pdf_de_factura, poll_facturas_once, procesar_email_factura, resolver_expensas,
 )
 from bot.tools.alertas import resetear_dedup
 from bot.tools.expensas_pdf import ExpensasNoParseable, FilaUnidad
@@ -482,3 +483,57 @@ def test_cualquier_error_de_descarga_sale_como_pdf_no_disponible():
         with patch("bot.tools.personal_pdf.resolver_url_pdf", return_value="https://x/y.pdf"):
             with pytest.raises(PersonalPdfNoDisponible, match="falló la descarga"):
                 descargar_factura_personal("https://tufactura.personal.com.ar/a", 1.0)
+
+
+# ──────────────────────────────────────────────
+# PDF de la factura (AySA)
+# ──────────────────────────────────────────────
+
+AYSA = FacturaParseada(
+    servicio="aysa", identificador="1929557", monto=30562.17,
+    vencimiento=date(2026, 8, 13), nro_factura="0111B20261385",
+    pdf_urls=("https://customer27066g.musvc2.net/e/tr?q=TOKEN",),
+)
+
+
+@pytest.mark.unit
+def test_cada_servicio_va_por_su_flujo_de_descarga():
+    """Personal salta por JavaScript y AySA por redirecciones: no se mezclan."""
+    with patch("bot.facturas_poller.descargar_factura_aysa", return_value=b"%PDF") as aysa, \
+         patch("bot.facturas_poller.descargar_factura_personal") as personal:
+        assert pdf_de_factura(AYSA) == b"%PDF"
+
+    personal.assert_not_called()
+    aysa.assert_called_once_with(AYSA.pdf_urls[0], "0111B20261385", 30562.17)
+
+
+@pytest.mark.unit
+def test_un_servicio_con_link_pero_sin_flujo_de_descarga_falla_claro():
+    """Si mañana un parser devuelve pdf_urls y nadie cableó la descarga, que se
+    note en el aviso y no en un archivado silencioso que nunca ocurre."""
+    with pytest.raises(ValueError, match="descarga automática"):
+        pdf_de_factura(replace(PERSONAL, servicio="edenor"))
+
+
+@pytest.mark.unit
+def test_cualquier_error_de_descarga_de_aysa_sale_como_pdf_no_disponible():
+    """El caller no tiene que distinguir en cuál de los saltos se rompió."""
+    from bot.tools.aysa_pdf import AysaPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf", side_effect=OSError("DNS")):
+        with patch("bot.tools.aysa_pdf.resolver_url_pdf", return_value="https://x/y.pdf"):
+            with pytest.raises(AysaPdfNoDisponible, match="falló la descarga"):
+                descargar_factura_aysa(AYSA.pdf_urls[0], AYSA.nro_factura, AYSA.monto)
+
+
+@pytest.mark.unit
+def test_un_pdf_que_no_es_de_esta_factura_no_se_archiva():
+    """La verificación por contenido es lo último que separa el PDF correcto del
+    del mes pasado: si no pasa, no puede quedar colgado igual."""
+    from bot.tools.aysa_pdf import AysaPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF"), \
+         patch("bot.tools.aysa_pdf.resolver_url_pdf", return_value="https://x/y.pdf"), \
+         patch("bot.tools.aysa_pdf.texto_primera_pagina", return_value="LSP 0111B99999999"):
+        with pytest.raises(AysaPdfNoDisponible, match="otra factura"):
+            descargar_factura_aysa(AYSA.pdf_urls[0], AYSA.nro_factura, AYSA.monto)

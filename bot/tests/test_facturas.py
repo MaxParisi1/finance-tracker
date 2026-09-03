@@ -255,7 +255,7 @@ def test_slug_inexistente_falla_claro():
 @pytest.mark.unit
 def test_personal_trae_el_link_de_descarga_del_pdf():
     """
-    Es el único de los cuatro servicios cuyo mail permite bajar el PDF sin login.
+    Su mail permite bajar el PDF sin login (AySA es el otro).
     Se lo lleva en pdf_urls para que el poller lo archive solo.
     """
     urls = parsear_email(cargar("personal")).pdf_urls
@@ -284,10 +284,83 @@ def test_sin_link_la_factura_se_registra_igual():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("fixture", ["edenor", "metrogas", "aysa"])
+@pytest.mark.parametrize("fixture", ["edenor", "metrogas"])
 def test_los_otros_servicios_no_traen_pdf_descargable(fixture):
     """Sus mails solo enlazan el portal con login: esos PDFs entran a mano."""
     assert parsear_email(cargar(fixture)).pdf_urls == ()
+
+
+# ──────────────────────────────────────────────
+# El botón de descarga de AySA
+# ──────────────────────────────────────────────
+
+def _href_de(html: str, texto_del_link: str) -> str:
+    """El href del <a> cuyo texto contiene `texto_del_link`."""
+    for m in re.finditer(r"<a\b([^>]*)>(.*?)</a>", html, re.I | re.S):
+        if texto_del_link.lower() in re.sub(r"<[^>]+>", " ", m.group(2)).lower():
+            return html_lib.unescape(re.search(r'href="([^"]+)"', m.group(1)).group(1))
+    raise AssertionError(f"el fixture no tiene un link {texto_del_link!r}")
+
+
+@pytest.mark.unit
+def test_aysa_trae_el_link_de_descarga_del_pdf():
+    """El botón "Descargar" sirve el PDF sin login, en dos redirecciones."""
+    urls = parsear_email(cargar("aysa")).pdf_urls
+    assert len(urls) == 1
+    assert urls[0] == _href_de(cargar("aysa")["html"], "Descargar")
+
+
+@pytest.mark.unit
+def test_el_link_de_baja_de_aysa_nunca_se_toma_por_el_de_descarga():
+    """
+    El de baja y el de descarga son URLs del mismo redirector de tracking:
+    indistinguibles salvo por lo que dice el link. Seguir el equivocado nos daría
+    de baja de la factura digital —dejarían de llegar los mails— y no habría
+    ningún error que lo delate.
+    """
+    urls = parsear_email(cargar("aysa")).pdf_urls
+    assert _href_de(cargar("aysa")["html"], "link de baja") not in urls
+
+
+@pytest.mark.unit
+def test_los_demas_links_del_mail_de_aysa_quedan_afuera():
+    """Términos y condiciones, Oficina Virtual, redes: ninguno es el PDF."""
+    email = cargar("aysa")
+    urls = parsear_email(email).pdf_urls
+    for otro in ("aquí", "Oficina Virtual", "www.aysa.com.ar"):
+        assert _href_de(email["html"], otro) not in urls
+
+
+@pytest.mark.unit
+def test_aysa_sin_boton_la_factura_se_registra_igual():
+    """El PDF es un extra: su ausencia no puede costar el registro del importe."""
+    f = parsear_email(cargar("aysa") | {"html": ""})
+    assert f.pdf_urls == ()
+    assert f.monto == pytest.approx(30562.17)
+    assert f.nro_factura == "0111B20261385"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("html, motivo", [
+    ('<a href="https://x.com/a" title="Descarga tu factura">Bajar</a>', "por el title"),
+    ('<a href="https://x.com/a">Descargá tu factura</a>', "por el texto"),
+])
+def test_el_boton_se_reconoce_por_cualquiera_de_las_dos_señales(html, motivo):
+    """Si AySA cambia el texto del botón o le saca el title, sigue habiendo una."""
+    from bot.tools.facturas import _urls_factura_aysa
+    assert _urls_factura_aysa({"html": html}) == ("https://x.com/a",), motivo
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("html", [
+    '<a href="https://x.com/baja">Descargar la baja del servicio</a>',
+    '<a href="https://x.com/u" title="Descargar">unsubscribe</a>',
+    '<a href="http://x.com/a">Descargar</a>',          # sin https
+    '<a title="Descarga tu factura">Descargar</a>',    # sin href
+])
+def test_lo_que_no_es_un_boton_de_descarga_se_descarta(html):
+    from bot.tools.facturas import _urls_factura_aysa
+    assert _urls_factura_aysa({"html": html}) == ()
 
 
 @pytest.mark.unit

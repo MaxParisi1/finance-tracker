@@ -10,6 +10,7 @@ FacturaNoParseable, el mail queda sin leer y se avisa por Telegram. Un formato
 nuevo debe ser una señal para escribir un parser, no un costo invisible.
 """
 
+import html as html_lib
 import logging
 import re
 from dataclasses import dataclass
@@ -178,6 +179,46 @@ def _parse_metrogas(email: dict) -> FacturaParseada:
     )
 
 
+# El botón "Descargar" del aviso de AySA sirve el PDF sin login, pero su URL es
+# la del redirector de tracking del proveedor de mailing: es indistinguible de
+# la de CUALQUIER otro link del mail, incluido el de baja de la factura digital.
+# Por eso el botón se elige por lo que dice —su texto o su title, dos señales
+# independientes— y no por su URL, y todo lo que hable de baja se descarta antes
+# de mirar nada más: seguir ese link por error nos borraría del aviso que este
+# bot lee todos los meses, y sin ningún error visible.
+_RE_ANCLA = re.compile(r"<a\b([^>]*)>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+_RE_HREF = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_RE_TITLE = re.compile(r"""title\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+
+# "Descargar", "Descargá tu factura", "Descarga tu factura": alcanza la raíz.
+_DESCARGA = ("descarg",)
+# Frases, no la palabra suelta: "baja" a secas también está adentro de "Bajar",
+# que es un nombre perfectamente posible para el botón que SÍ queremos.
+_BAJA = ("de baja", "baja del", "unsubscribe", "suscri")
+
+
+def _urls_factura_aysa(email: dict) -> tuple[str, ...]:
+    """Los links del botón de descarga, sin duplicados y en orden de aparición."""
+    urls = []
+    for atributos, interior in _RE_ANCLA.findall(email.get("html", "")):
+        href = _RE_HREF.search(atributos)
+        if not href:
+            continue
+        url = html_lib.unescape(href.group(1)).strip()
+        if not url.lower().startswith("https://"):
+            continue
+
+        titulo = _RE_TITLE.search(atributos)
+        texto = re.sub(r"<[^>]+>", " ", interior)
+        etiqueta = html_lib.unescape(f"{titulo.group(1) if titulo else ''} {texto}").lower()
+
+        if any(p in etiqueta for p in _BAJA):
+            continue
+        if any(p in etiqueta for p in _DESCARGA):
+            urls.append(url)
+    return tuple(dict.fromkeys(urls))
+
+
 def _parse_aysa(email: dict) -> FacturaParseada:
     t = email["texto"]
     # AySA arma una tabla con TODOS los encabezados primero y después los valores,
@@ -193,6 +234,9 @@ def _parse_aysa(email: dict) -> FacturaParseada:
         monto=_monto(par.group(1)),
         vencimiento=_fecha(par.group(2)),
         nro_factura=valores.group(2).strip(),
+        # El PDF es un extra: si el botón no está, la factura se registra igual
+        # y el repaso de los lunes se encarga de reclamar el documento.
+        pdf_urls=_urls_factura_aysa(email),
     )
 
 

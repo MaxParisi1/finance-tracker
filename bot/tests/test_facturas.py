@@ -283,11 +283,61 @@ def test_sin_link_la_factura_se_registra_igual():
     assert f.vencimiento == date(2026, 8, 4)
 
 
+# ──────────────────────────────────────────────
+# El link de descarga de Edenor
+# ──────────────────────────────────────────────
+
 @pytest.mark.unit
-@pytest.mark.parametrize("fixture", ["edenor", "metrogas"])
-def test_los_otros_servicios_no_traen_pdf_descargable(fixture):
-    """Sus mails solo enlazan el portal con login: esos PDFs entran a mano."""
-    assert parsear_email(cargar(fixture)).pdf_urls == ()
+def test_edenor_trae_el_link_de_descarga_del_pdf():
+    """Se guarda el destino ya decodificado, no el link del tracker."""
+    urls = parsear_email(cargar("edenor")).pdf_urls
+    assert len(urls) == 1
+    assert urls[0].startswith("https://edenordigital.com/descarga_de_factura?token=")
+
+
+@pytest.mark.unit
+def test_el_link_de_edenor_no_esta_escrito_en_el_mail():
+    """
+    Está en base64 adentro del link de tracking: si el parser buscara la URL de
+    descarga como texto no encontraría nada, y en silencio.
+    """
+    email = cargar("edenor")
+    assert "descarga_de_factura" not in email["html"]
+    assert parsear_email(email).pdf_urls
+
+
+@pytest.mark.unit
+def test_de_todos_los_links_del_mail_de_edenor_solo_uno_es_la_factura():
+    """
+    El mail trae una docena de links del mismo tracker —el portal, el login, las
+    redes, los términos— indistinguibles entre sí salvo por su destino.
+    """
+    email = cargar("edenor")
+    tracking = re.findall(r'href="(https://relaytrk\.edenor\.com[^"]+)"', email["html"])
+    assert len(set(tracking)) > 5
+    assert len(parsear_email(email).pdf_urls) == 1
+
+
+@pytest.mark.unit
+def test_edenor_sin_boton_la_factura_se_registra_igual():
+    """El PDF es un extra: su ausencia no puede costar el registro del importe."""
+    f = parsear_email(cargar("edenor") | {"html": ""})
+    assert f.pdf_urls == ()
+    assert f.monto == pytest.approx(13405.84)
+
+
+@pytest.mark.unit
+def test_un_tracking_que_no_decodifica_no_rompe_el_parseo():
+    """Si Edenor cambia el formato del link, se pierde el PDF, no la factura."""
+    from bot.tools.facturas import _urls_factura_edenor
+    roto = '<a href="https://relaytrk.edenor.com/Click/Track?p=@@@">x</a>'
+    assert _urls_factura_edenor({"html": roto}) == ()
+
+
+@pytest.mark.unit
+def test_metrogas_no_trae_pdf_descargable():
+    """Su mail solo enlaza el portal con login: ese PDF sigue entrando a mano."""
+    assert parsear_email(cargar("metrogas")).pdf_urls == ()
 
 
 # ──────────────────────────────────────────────

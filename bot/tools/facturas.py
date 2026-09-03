@@ -10,12 +10,17 @@ FacturaNoParseable, el mail queda sin leer y se avisa por Telegram. Un formato
 nuevo debe ser una señal para escribir un parser, no un costo invisible.
 """
 
+import base64
+import binascii
 import html as html_lib
+import json
 import logging
 import re
 from dataclasses import dataclass
 from datetime import date
+from urllib.parse import parse_qs, urlparse
 
+from bot.tools.edenor_pdf import es_url_de_descarga
 from bot.tools.montos import parse_monto_ar, parse_fecha_ar, MontoInvalido
 
 logger = logging.getLogger(__name__)
@@ -143,6 +148,40 @@ _MONTO_LUEGO_FECHA = r"\$\s*([\d.,]+)\s*\n\s*(\d{2}/\d{2}/\d{4})"
 # Parsers por servicio
 # ──────────────────────────────────────────────
 
+# El mail de Edenor no tiene un botón con texto: los botones son imágenes. Pero
+# su link de tracking lleva el destino real adentro, en base64
+# ({"linkUrl": "https://edenordigital.com/descarga_de_factura?token=…"}), así que
+# el criterio no es lo que dice el link sino a dónde va. Elegir por destino es
+# más fuerte que elegir por texto: el link al portal, el de las redes y el de
+# términos y condiciones quedan afuera por construcción, no por una lista de
+# palabras. Y como el destino ya viene en el mail, no hace falta pasar por el
+# tracker para descubrirlo.
+_RE_HREF_EDENOR = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+
+def _destino_del_tracking(url: str) -> str | None:
+    """El linkUrl que el tracker de Edenor lleva en base64, si es que lo lleva."""
+    codificado = parse_qs(urlparse(url).query).get("p", [""])[0]
+    if not codificado:
+        return None
+    try:
+        datos = json.loads(base64.urlsafe_b64decode(codificado + "=" * (-len(codificado) % 4)))
+    except (ValueError, binascii.Error):
+        return None
+    destino = datos.get("linkUrl") if isinstance(datos, dict) else None
+    return destino if isinstance(destino, str) else None
+
+
+def _urls_factura_edenor(email: dict) -> tuple[str, ...]:
+    """Los links a la descarga del PDF, sin duplicados y en orden de aparición."""
+    urls = []
+    for href in _RE_HREF_EDENOR.findall(email.get("html", "")):
+        destino = _destino_del_tracking(html_lib.unescape(href))
+        if destino and es_url_de_descarga(destino):
+            urls.append(destino)
+    return tuple(dict.fromkeys(urls))
+
+
 def _parse_edenor(email: dict) -> FacturaParseada:
     t = email["texto"]
     cuenta = _buscar(r"N[úu]mero de cuenta\s*\n\s*([\d\s]{6,20})", t, "número de cuenta")
@@ -154,6 +193,9 @@ def _parse_edenor(email: dict) -> FacturaParseada:
         identificador=_norm_id(cuenta.group(1)),
         monto=_monto(monto.group(1)),
         vencimiento=_fecha(vto.group(1)),
+        # El PDF es un extra: si el botón no está, la factura se registra igual
+        # y el repaso de los lunes se encarga de reclamar el documento.
+        pdf_urls=_urls_factura_edenor(email),
     )
 
 

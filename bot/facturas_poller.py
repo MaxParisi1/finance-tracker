@@ -103,14 +103,16 @@ def parsear_con_fallback(email_parseable: dict):
         return parsear_email(email_parseable, slug=slug)
 
 
-def descargar_pdf(url: str) -> bytes:
+def descargar_pdf(url: str, headers: dict | None = None) -> bytes:
     """
     Descarga un PDF verificando tipo y tamaño. Se importa requests acá adentro
     para no pagarlo en el arranque del bot.
+
+    `headers` lo usa Edenor, cuya API pide una cabecera de tenant para responder.
     """
     import requests
 
-    resp = requests.get(url, timeout=TIMEOUT_DESCARGA, stream=True)
+    resp = requests.get(url, timeout=TIMEOUT_DESCARGA, stream=True, headers=headers)
     resp.raise_for_status()
 
     tipo = resp.headers.get("Content-Type", "")
@@ -209,19 +211,46 @@ def descargar_factura_aysa(url: str, nro_factura: str | None, monto: float) -> b
     return pdf
 
 
+def descargar_factura_edenor(url: str, identificador: str, monto: float) -> bytes:
+    """
+    El pedido a la API pública de la Oficina Virtual más la verificación de que
+    el PDF sea el de esta factura. Cualquier fallo sale como EdenorPdfNoDisponible
+    para que el caller no tenga que distinguir en cuál de los pasos se rompió.
+    """
+    from bot.tools.edenor_pdf import (
+        CABECERAS, EdenorPdfNoDisponible, token_de_url, url_del_pdf,
+        verificar_cuenta, verificar_factura,
+    )
+
+    try:
+        token = token_de_url(url)
+        verificar_cuenta(token, identificador)
+        pdf = descargar_pdf(url_del_pdf(token), headers=CABECERAS)
+    except EdenorPdfNoDisponible:
+        raise
+    except Exception as exc:
+        raise EdenorPdfNoDisponible(f"falló la descarga: {exc}") from exc
+
+    verificar_factura(pdf, identificador, monto)
+    return pdf
+
+
 def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     """
     Baja el PDF con el flujo del servicio que corresponda.
 
-    Personal y AySA enlazan el PDF con un token que no pide login; Edenor y
-    MetroGAS solo enlazan su portal, así que esos dos siguen entrando a mano por
-    Telegram. Si mañana se suma otro, acá va el ruteo.
+    Personal, AySA y Edenor enlazan el PDF con un token que no pide login, cada
+    uno con su flujo. MetroGAS solo enlaza su portal, así que ese sigue entrando
+    a mano por Telegram. Si mañana se suma otro, acá va el ruteo.
     """
     if parseada.servicio == "personal":
         return descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
     if parseada.servicio == "aysa":
         return descargar_factura_aysa(parseada.pdf_urls[0], parseada.nro_factura,
                                       parseada.monto)
+    if parseada.servicio == "edenor":
+        return descargar_factura_edenor(parseada.pdf_urls[0], parseada.identificador,
+                                        parseada.monto)
     raise ValueError(
         f"el servicio {parseada.servicio!r} trae link al PDF pero no tiene "
         f"descarga automática implementada"

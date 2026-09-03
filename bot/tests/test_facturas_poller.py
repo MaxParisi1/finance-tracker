@@ -14,8 +14,9 @@ from unittest.mock import patch
 import pytest
 
 from bot.facturas_poller import (
-    descargar_factura_aysa, descargar_factura_personal, descargar_pdf,
-    pdf_de_factura, poll_facturas_once, procesar_email_factura, resolver_expensas,
+    descargar_factura_aysa, descargar_factura_edenor, descargar_factura_personal,
+    descargar_pdf, pdf_de_factura, poll_facturas_once, procesar_email_factura,
+    resolver_expensas,
 )
 from bot.tools.alertas import resetear_dedup
 from bot.tools.expensas_pdf import ExpensasNoParseable, FilaUnidad
@@ -512,7 +513,7 @@ def test_un_servicio_con_link_pero_sin_flujo_de_descarga_falla_claro():
     """Si mañana un parser devuelve pdf_urls y nadie cableó la descarga, que se
     note en el aviso y no en un archivado silencioso que nunca ocurre."""
     with pytest.raises(ValueError, match="descarga automática"):
-        pdf_de_factura(replace(PERSONAL, servicio="edenor"))
+        pdf_de_factura(replace(PERSONAL, servicio="metrogas"))
 
 
 @pytest.mark.unit
@@ -537,3 +538,69 @@ def test_un_pdf_que_no_es_de_esta_factura_no_se_archiva():
          patch("bot.tools.aysa_pdf.texto_primera_pagina", return_value="LSP 0111B99999999"):
         with pytest.raises(AysaPdfNoDisponible, match="otra factura"):
             descargar_factura_aysa(AYSA.pdf_urls[0], AYSA.nro_factura, AYSA.monto)
+
+
+# ──────────────────────────────────────────────
+# PDF de la factura (Edenor)
+# ──────────────────────────────────────────────
+
+TOKEN_EDENOR = ("eyJhbGciOiJIUzI1NiJ9."
+                "eyJjdWVudGFfaWQiOiI1MjU1MDY0NTg2IiwiZmFjdHVyYV9pZCI6IjEifQ.firma")
+
+EDENOR = FacturaParseada(
+    servicio="edenor", identificador="5255064586", monto=13405.84,
+    vencimiento=date(2026, 8, 5),
+    pdf_urls=(f"https://edenordigital.com/descarga_de_factura?token={TOKEN_EDENOR}",),
+)
+
+
+@pytest.mark.unit
+def test_edenor_va_por_su_propio_flujo():
+    with patch("bot.facturas_poller.descargar_factura_edenor", return_value=b"%PDF") as edenor:
+        assert pdf_de_factura(EDENOR) == b"%PDF"
+    edenor.assert_called_once_with(EDENOR.pdf_urls[0], "5255064586", 13405.84)
+
+
+@pytest.mark.unit
+def test_el_pedido_a_la_api_de_edenor_lleva_la_cabecera_del_tenant():
+    """Sin Utility-ID la API responde 400: si se pierde, esto lo dice."""
+    with patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF") as bajar, \
+         patch("bot.tools.edenor_pdf.texto_primera_pagina",
+               return_value="Cuenta 5 255 064 586 TOTALAPAGAR $ 13.405,84"):
+        descargar_factura_edenor(EDENOR.pdf_urls[0], EDENOR.identificador, EDENOR.monto)
+
+    url, kwargs = bajar.call_args[0][0], bajar.call_args[1]
+    assert url.startswith("https://utilitygo.widergy.com/api/v1/bills/public_pdf?token=")
+    assert kwargs["headers"]["Utility-ID"] == "19"
+
+
+@pytest.mark.unit
+def test_una_factura_de_otra_cuenta_no_se_llega_a_pedir():
+    """El token dice de qué cuenta es: si no es la del mail, no se pide nada."""
+    from bot.tools.edenor_pdf import EdenorPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf") as bajar:
+        with pytest.raises(EdenorPdfNoDisponible, match="cuenta"):
+            descargar_factura_edenor(EDENOR.pdf_urls[0], "9999999999", EDENOR.monto)
+    bajar.assert_not_called()
+
+
+@pytest.mark.unit
+def test_cualquier_error_de_descarga_de_edenor_sale_como_pdf_no_disponible():
+    from bot.tools.edenor_pdf import EdenorPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf", side_effect=OSError("DNS")):
+        with pytest.raises(EdenorPdfNoDisponible, match="falló la descarga"):
+            descargar_factura_edenor(EDENOR.pdf_urls[0], EDENOR.identificador, EDENOR.monto)
+
+
+@pytest.mark.unit
+def test_el_pdf_del_mes_pasado_de_edenor_no_se_archiva():
+    """La cuenta coincide igual todos los meses: lo que lo delata es el importe."""
+    from bot.tools.edenor_pdf import EdenorPdfNoDisponible
+
+    with patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF"), \
+         patch("bot.tools.edenor_pdf.texto_primera_pagina",
+               return_value="Cuenta 5 255 064 586 TOTALAPAGAR $ 12.000,00"):
+        with pytest.raises(EdenorPdfNoDisponible, match="otra factura"):
+            descargar_factura_edenor(EDENOR.pdf_urls[0], EDENOR.identificador, EDENOR.monto)

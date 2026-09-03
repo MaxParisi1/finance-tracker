@@ -172,6 +172,15 @@ def totales_a_pagar(texto: str) -> set[float]:
     return valores
 
 
+def _coincide(valor: float, esperado: float) -> bool:
+    """
+    Compara importes a nivel centavo. El redondeo es necesario: restar dos floats
+    que difieren en un centavo da 0.010000000000218, que sin esto quedaría afuera
+    de la tolerancia por ruido binario y no por el dato.
+    """
+    return abs(round(valor - esperado, 2)) <= TOLERANCIA_MONTO
+
+
 def verificar_factura(pdf_bytes: bytes, nro_factura: str | None, monto: float) -> None:
     """
     Confirma que el PDF descargado sea el de ESTA factura y no el de otro mes.
@@ -202,7 +211,7 @@ def verificar_factura(pdf_bytes: bytes, nro_factura: str | None, monto: float) -
 
     totales = totales_a_pagar(texto)
     if totales:
-        if any(abs(t - monto) <= TOLERANCIA_MONTO for t in totales):
+        if any(_coincide(t, monto) for t in totales):
             verificado.append(f"total a pagar ${formatear_monto_ar(monto)}")
         elif verificado:
             # El PDF es el de esta LSP pero el importe no es el que se registró:
@@ -220,7 +229,7 @@ def verificar_factura(pdf_bytes: bytes, nro_factura: str | None, monto: float) -
     elif not verificado:
         # Sin LSP y sin la etiqueta del total: última red, que el importe figure
         # en algún lado de la portada.
-        if not any(abs(m - monto) <= TOLERANCIA_MONTO for m in montos_en_texto(texto)):
+        if not any(_coincide(m, monto) for m in montos_en_texto(texto)):
             raise AysaPdfNoDisponible(
                 f"no pude verificar el PDF: no menciona ni la factura {nro_factura} "
                 f"ni ${formatear_monto_ar(monto)}"

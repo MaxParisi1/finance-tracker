@@ -5,9 +5,9 @@ Drive + factura vinculada + gasto registrado, sin preguntarte nada.
 Orquesta las piezas ya testeadas por separado (identificación, conciliación,
 Drive) y define QUÉ pasa en cada combinación:
 
-  factura     + factura abierta  → PDF a Drive colgado de la factura
-  comprobante + factura abierta  → PDF a Drive + gasto creado + factura saldada
-  cualquiera  + sin factura      → PDF a Drive igual, sin vincular, y se avisa
+  factura     + factura del mes   → PDF a Drive colgado de la factura
+  comprobante + factura pendiente → PDF a Drive + gasto creado + factura saldada
+  cualquiera  + sin factura       → PDF a Drive igual, sin vincular, y se avisa
 
 La última regla es deliberada: el objetivo es registro total, así que un
 documento nunca se descarta por no encontrarle pareja. Se archiva y queda
@@ -19,8 +19,12 @@ from dataclasses import dataclass
 from datetime import date
 
 from bot.db import queries
-from bot.tools.conciliacion import elegir_factura
-from bot.tools.documentos import TIPO_COMPROBANTE, DocumentoIdentificado
+from bot.tools.conciliacion import (
+    TOLERANCIA_MINIMA, TOLERANCIA_RELATIVA, SeleccionFactura, elegir_factura,
+)
+from bot.tools.documentos import (
+    TIPO_COMPROBANTE, TIPO_FACTURA, DocumentoIdentificado,
+)
 from bot.tools.drive_manager import get_drive_manager
 
 logger = logging.getLogger(__name__)
@@ -90,6 +94,35 @@ def _registrar_pago(servicio: dict, factura: dict, fecha: date) -> dict:
     return gasto
 
 
+def _seleccionar_factura(servicio: dict, doc: DocumentoIdentificado) -> SeleccionFactura:
+    """
+    Elige a qué factura corresponde el documento, según lo que el documento ES.
+
+    Un comprobante registra un pago: solo puede saldar una factura PENDIENTE, y
+    por eso se concilia contra ésas. Una factura es documentación, y puede llegar
+    después de que la pagaste — ahí no queda ninguna pendiente contra la cual
+    conciliar y el PDF terminaba archivado como huérfano, con la celda de Registro
+    incompleta para siempre. Para ese caso manda el vencimiento, que es lo que
+    identifica sin ambigüedad a qué período pertenece: los importes de meses
+    vecinos entran dentro de la tolerancia del 5% y no alcanzan para desempatar.
+
+    Si el PDF no expone el vencimiento de forma legible (Edenor y MetroGAS lo
+    escriben pegado al texto), se cae al camino de siempre.
+    """
+    if doc.tipo == TIPO_FACTURA and doc.fecha is not None:
+        exacta = queries.obtener_factura_por_vencimiento(
+            servicio["id"], doc.fecha.isoformat()
+        )
+        if exacta and exacta.get("estado") != "anulada":
+            esperado = float(exacta["monto"])
+            tolerancia = max(abs(esperado) * TOLERANCIA_RELATIVA, TOLERANCIA_MINIMA)
+            coincide = doc.monto is not None and abs(doc.monto - esperado) <= tolerancia
+            return SeleccionFactura(exacta, "coincide por vencimiento", coincide)
+
+    pendientes = queries.obtener_facturas_pendientes(servicio["id"])
+    return elegir_factura(pendientes, doc.monto, doc.fecha)
+
+
 def archivar_documento(
     doc: DocumentoIdentificado,
     pdf_bytes: bytes,
@@ -104,8 +137,7 @@ def archivar_documento(
     servicio = doc.servicio
     fecha = doc.fecha or hoy
 
-    pendientes = queries.obtener_facturas_pendientes(servicio["id"])
-    seleccion = elegir_factura(pendientes, doc.monto, doc.fecha)
+    seleccion = _seleccionar_factura(servicio, doc)
     factura = seleccion.factura
 
     avisos = []

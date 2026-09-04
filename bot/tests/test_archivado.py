@@ -37,10 +37,13 @@ def doc(tipo=TIPO_COMPROBANTE, monto=30562.17, fecha=date(2026, 8, 7)):
 class Entorno:
     """Patchea todo el borde externo (Drive + DB) y expone los mocks."""
 
-    def __init__(self, pendientes=None, recurrente=RECURRENTE, saldada=None):
+    def __init__(self, pendientes=None, recurrente=RECURRENTE, saldada=None,
+                 por_vencimiento=None):
         self._p = [
             patch("bot.tools.archivado.queries.obtener_facturas_pendientes",
                   return_value=pendientes if pendientes is not None else [FACTURA]),
+            patch("bot.tools.archivado.queries.obtener_factura_por_vencimiento",
+                  return_value=por_vencimiento),
             patch("bot.tools.archivado.queries.obtener_recurrente_por_id",
                   return_value=recurrente),
             patch("bot.tools.archivado.queries.marcar_factura_pagada",
@@ -54,8 +57,9 @@ class Entorno:
         ]
 
     def __enter__(self):
-        (self.pendientes, self.recurrente, self.saldar, self.vincular,
-         self.insertar_archivo, self.subir, self.guardar_gasto) = [p.start() for p in self._p]
+        (self.pendientes, self.por_vencimiento, self.recurrente, self.saldar,
+         self.vincular, self.insertar_archivo, self.subir,
+         self.guardar_gasto) = [p.start() for p in self._p]
         return self
 
     def __exit__(self, *a):
@@ -139,6 +143,52 @@ def test_factura_se_cuelga_de_la_factura_sin_crear_gasto():
     env.guardar_gasto.assert_not_called()
     env.saldar.assert_not_called()
     assert env.insertar_archivo.call_args[0][0]["factura_id"] == "fac-1"
+
+
+PAGADA = {"id": "fac-pagada", "monto": 30562.17, "moneda": "ARS",
+          "vencimiento": "2026-08-13", "estado": "pagada"}
+
+
+@pytest.mark.unit
+def test_una_factura_que_llega_despues_del_pago_igual_se_vincula():
+    """
+    Bug real: al archivar se conciliaba SIEMPRE contra las facturas pendientes,
+    también para un documento de tipo factura. Si el PDF llegaba después de haber
+    pagado no quedaba ninguna pendiente, el archivo se guardaba huérfano y la
+    celda de Registro no podía completarse nunca.
+    """
+    factura = doc(tipo=TIPO_FACTURA, fecha=date(2026, 8, 13))
+    with Entorno(pendientes=[], por_vencimiento=PAGADA) as env:
+        r = archivar_documento(factura, b"%PDF", hoy=HOY)
+
+    assert r.factura["id"] == "fac-pagada"
+    assert r.aviso is None
+    assert env.insertar_archivo.call_args[0][0]["factura_id"] == "fac-pagada"
+    # Sigue siendo documentación: no reabre ni vuelve a pagar nada.
+    env.guardar_gasto.assert_not_called()
+    env.saldar.assert_not_called()
+
+
+@pytest.mark.unit
+def test_una_factura_anulada_no_se_usa_como_pareja():
+    anulada = {**PAGADA, "estado": "anulada"}
+    with Entorno(pendientes=[], por_vencimiento=anulada) as env:
+        r = archivar_documento(doc(tipo=TIPO_FACTURA, fecha=date(2026, 8, 13)),
+                               b"%PDF", hoy=HOY)
+
+    assert r.factura is None
+    assert env.insertar_archivo.call_args[0][0]["factura_id"] is None
+
+
+@pytest.mark.unit
+def test_un_comprobante_nunca_salda_una_factura_ya_pagada():
+    """El camino por vencimiento es solo para documentación, no para pagos."""
+    with Entorno(pendientes=[], por_vencimiento=PAGADA) as env:
+        r = archivar_documento(doc(fecha=date(2026, 8, 13)), b"%PDF", hoy=HOY)
+
+    assert r.factura is None          # se concilió contra pendientes, que está vacía
+    env.por_vencimiento.assert_not_called()
+    env.guardar_gasto.assert_not_called()
 
 
 # ──────────────────────────────────────────────

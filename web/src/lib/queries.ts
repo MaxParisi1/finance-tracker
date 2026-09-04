@@ -1092,6 +1092,13 @@ export async function getRegistro(anio: number): Promise<Registro> {
       const factura = archivos.find(a => a.tipo === 'factura')
       const comprobante = archivos.find(a => a.tipo === 'comprobante')
 
+      // Dos facturas del mismo servicio en el mismo mes (una reemisión, un
+      // bimestre que se corre) comparten celda. Gana la que vence primero, igual
+      // que en getFijosDelMes, en vez de que la última del resultset pise a la
+      // otra y la haga desaparecer de la grilla sin aviso.
+      const previa = celdas[key]
+      if (previa && previa.vencimiento <= String(f.vencimiento)) continue
+
       celdas[key] = {
         factura_id: f.id,
         borrador_consorcio: Boolean(f.borrador_consorcio_at),

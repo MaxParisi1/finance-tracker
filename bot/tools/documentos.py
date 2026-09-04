@@ -138,36 +138,69 @@ def _primer_monto(texto: str) -> float | None:
     return None
 
 
-_FECHA = r"\d{1,2}\s*/\s*(?:[a-záéíóú]{3,}|\d{1,2})\s*/\s*\d{2,4}"
+_FECHA_BARRAS = r"\d{1,2}\s*/\s*(?:[a-záéíóú]{3,}|\d{1,2})\s*/\s*\d{2,4}"
+# Mercado Pago encabeza el comprobante con la fecha del pago en letras
+# ("Viernes, 31 de julio de 2026, 20:30.") y es el ÚNICO lugar del PDF donde
+# aparece: las otras dos fechas son el vencimiento de la factura y el timestamp
+# embebido en el código de barras.
+_FECHA_LETRAS = r"\d{1,2}\s+de\s+[a-záéíóú]+\s+de\s+\d{4}"
+_FECHA = f"(?:{_FECHA_BARRAS}|{_FECHA_LETRAS})"
 
 # Etiquetas que preceden a la fecha que nos interesa, por orden de preferencia.
 # Sin esto se agarra la primera fecha del PDF, que en las facturas suele ser el
 # "Inicio de actividades" de la empresa (AySA: 2006, MetroGAS: 1992).
-_ETIQUETAS_FECHA = (
-    r"vencimiento[:\s]*", r"vence(?:\s+el)?[:\s]*", r"fecha\s+de\s+pago[:\s]*", r"fecha[:\s]*",
+#
+# Se separan por tipo porque la fecha que importa NO es la misma. De una factura
+# queremos el vencimiento; de un comprobante, cuándo se pagó. Los comprobantes de
+# Mercado Pago reproducen el vencimiento de la factura, así que buscar esa
+# etiqueta acá fechaba el pago en el futuro: un pago del 31/07 quedaba asentado
+# al 13/08, y con él el gasto y el `fecha_pago` de la factura.
+_ETIQUETAS_FACTURA = (
+    r"vencimiento[:\s]*", r"vence(?:\s+el)?[:\s]*", r"fecha[:\s]*",
+)
+_ETIQUETAS_COMPROBANTE = (
+    r"fecha\s+de\s+pago[:\s]*", r"fecha[:\s]*",
+)
+
+# El vencimiento y su etiqueta, para poder borrarlos de un comprobante antes de
+# buscar a ciegas. No alcanza con despriorizar la etiqueta: si el comprobante no
+# rotula la fecha del pago, el barrido final volvería a encontrar el vencimiento.
+_RE_VENCIMIENTO = re.compile(
+    r"(?:vencimiento|vence(?:\s+el)?)[:\s]*" + _FECHA, re.I,
 )
 
 # Una fecha de este circuito no puede estar a años de hoy.
 _MARGEN_ANIOS = 3
 
 
-def _fecha_documento(texto: str, hoy: object | None = None) -> object | None:
+def _fecha_documento(texto: str, tipo: str = TIPO_FACTURA,
+                     hoy: object | None = None) -> object | None:
     """
     Fecha del documento, priorizando la que sigue a una etiqueta conocida y
     descartando las implausibles. Devuelve None antes que una fecha inventada.
+
+    En un comprobante se busca la fecha del pago: se descartan los vencimientos
+    y cualquier fecha futura, porque nadie paga mañana.
     """
     from datetime import date as _date
 
     hoy = hoy or _date.today()
+    es_comprobante = tipo == TIPO_COMPROBANTE
+
+    if es_comprobante:
+        texto = _RE_VENCIMIENTO.sub(" ", texto)
 
     def _plausible(cruda: str):
         try:
             f = parse_fecha_ar(cruda)
         except MontoInvalido:
             return None
-        return f if abs(f.year - hoy.year) <= _MARGEN_ANIOS else None
+        if abs(f.year - hoy.year) > _MARGEN_ANIOS:
+            return None
+        return None if es_comprobante and f > hoy else f
 
-    for etiqueta in _ETIQUETAS_FECHA:
+    etiquetas = _ETIQUETAS_COMPROBANTE if es_comprobante else _ETIQUETAS_FACTURA
+    for etiqueta in etiquetas:
         for m in re.finditer(etiqueta + f"({_FECHA})", texto, re.I):
             fecha = _plausible(m.group(1))
             if fecha:
@@ -208,7 +241,7 @@ def identificar_documento(pdf_bytes: bytes) -> DocumentoIdentificado:
         tipo=tipo,
         identificador=ident["valor"],
         monto=_primer_monto(texto),
-        fecha=_fecha_documento(texto),
+        fecha=_fecha_documento(texto, tipo),
     )
     logger.info(
         "Documento identificado: %s · %s · $%s",

@@ -77,6 +77,11 @@ def test_expensas_uf255_cierra_aritmeticamente():
     ("05/ago/2026", date(2026, 8, 5),  "comprobante MP Edenor"),
     ("14/ago/2026", date(2026, 8, 14), "comprobante MP MetroGAS"),
     ("31/07/2026", date(2026, 7, 31), "comprobante Personal Pay · fecha de pago"),
+    # Encabezado en letras del comprobante de Mercado Pago: el ÚNICO lugar del
+    # PDF donde figura cuándo se pagó de verdad.
+    ("31 de julio de 2026", date(2026, 7, 31), "comprobante MP AySA · fecha del pago"),
+    ("4 de agosto de 2026", date(2026, 8, 4),  "comprobante MP MetroGAS · fecha del pago"),
+    ("1 de septiembre de 2026", date(2026, 9, 1), "mes de nombre largo"),
 ])
 def test_parse_fecha_ar(token, esperado, origen):
     assert parse_fecha_ar(token) == esperado, origen

@@ -12,8 +12,8 @@ from unittest.mock import patch
 import pytest
 
 from bot.tools.documentos import (
-    TIPO_COMPROBANTE, TIPO_FACTURA, DocumentoNoIdentificado, aplanar,
-    detectar_tipo, identificar_documento, identificar_servicio,
+    TIPO_COMPROBANTE, TIPO_FACTURA, DocumentoNoIdentificado, _fecha_documento,
+    aplanar, detectar_tipo, identificar_documento, identificar_servicio,
 )
 
 # ── Identificadores tal como quedan en servicios_identificadores ──────────────
@@ -66,6 +66,17 @@ Cuenta de origen CA$ 99-629107/7
 CBU/CVU del destinatario 0070306020000004521499
 CUIT destinatario 30553713605
 Motivo y concepto EXPENSAS Expensas 3D"""
+
+# Verbatim del comprobante de AySA: la fecha del pago va en el encabezado, en
+# letras, y el "Vencimiento" de más abajo es el de la factura.
+COMPROBANTE_AYSA_CON_FECHA = """Comprobante de pago
+Viernes, 31 de julio de 2026, 20:30.
+$ 30.56217
+Aysa
+Cuenta de servicios 1929557
+Vencimiento
+13/ago/2026
+Medio de pago Dinero disponible"""
 
 COMPROBANTE_PERSONAL = """Fecha: 31/07/2026 - 20:22:35 h
 Pagaste $67.894,40
@@ -221,7 +232,9 @@ def test_comprobante_de_mercado_pago_completo():
     assert doc.tipo == TIPO_COMPROBANTE
     # $ 13.40584 → Mercado Pago pierde la coma; los 2 últimos son centavos.
     assert doc.monto == pytest.approx(13405.84)
-    assert doc.fecha == date(2026, 8, 5)
+    # La fecha del PAGO (encabezado en letras), no el vencimiento de la factura
+    # que el mismo comprobante reproduce más abajo.
+    assert doc.fecha == date(2026, 7, 31)
 
 
 @pytest.mark.unit
@@ -290,12 +303,47 @@ def test_sin_fecha_plausible_devuelve_none():
 
 
 @pytest.mark.unit
-def test_prefiere_la_fecha_etiquetada_sobre_la_primera_del_texto():
-    texto = """Comprobante de pago
+def test_factura_prefiere_la_fecha_etiquetada_sobre_la_primera_del_texto():
+    texto = """Liquidación de Servicios
     Impreso el 02/08/2026
     Número de cuenta 5255064586
     Vencimiento 05/08/2026"""
     assert _identificar(texto).fecha == date(2026, 8, 5)
+
+
+# ──────────────────────────────────────────────
+# Fecha de un comprobante: cuándo se pagó, no cuándo vencía
+# ──────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_comprobante_ignora_el_vencimiento_de_la_factura():
+    """
+    Bug real: los comprobantes de Mercado Pago reproducen el vencimiento de la
+    factura, y era la primera etiqueta que se buscaba. Un pago del 31/07 quedaba
+    asentado al 13/08 — con el gasto y el `fecha_pago` de la factura fechados en
+    el futuro, corriendo de mes el total del dashboard.
+    """
+    doc = _identificar(COMPROBANTE_AYSA_CON_FECHA)
+    assert doc.tipo == TIPO_COMPROBANTE
+    assert doc.fecha == date(2026, 7, 31)
+
+
+@pytest.mark.unit
+def test_comprobante_sin_fecha_propia_no_cae_en_el_vencimiento():
+    """Antes que devolver el vencimiento (una fecha futura), no devuelve nada."""
+    texto = """Comprobante de pago
+    Cuenta de servicios 1929557
+    Vencimiento 13/ago/2026"""
+    assert _identificar(texto).fecha is None
+
+
+@pytest.mark.unit
+def test_comprobante_nunca_se_fecha_en_el_futuro():
+    """Nadie paga mañana: una fecha futura es siempre una lectura equivocada."""
+    texto = "Comprobante de pago\nFecha 25/12/2026"
+    assert _fecha_documento(texto, TIPO_COMPROBANTE, date(2026, 9, 4)) is None
+    # La misma fecha en una factura es un vencimiento perfectamente válido.
+    assert _fecha_documento(texto, TIPO_FACTURA, date(2026, 9, 4)) == date(2026, 12, 25)
 
 
 # ──────────────────────────────────────────────

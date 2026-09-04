@@ -38,6 +38,10 @@ _MONTO_RE = re.compile(
     r"(?![\d/])"               # no terminar pegado a dígito ni a barra
 )
 
+# Separador entre día, mes y año. La forma en letras ("31 de julio de 2026")
+# convive con la de barras porque un mismo comprobante usa las dos.
+_SEP_FECHA = r"(?:\s*[/\-]\s*|\s+de\s+)"
+
 _MESES = {
     "ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6,
     "jul": 7, "ago": 8, "sep": 9, "set": 9, "oct": 10, "nov": 11, "dic": 12,
@@ -104,10 +108,16 @@ def montos_en_texto(texto: str) -> list[float]:
 def parse_fecha_ar(token: str) -> date:
     """
     Convierte una fecha argentina a date.
-    Acepta "13/08/2026" y "13/ago/2026" (Mercado Pago abrevia el mes).
+
+    Acepta "13/08/2026", "13/ago/2026" (Mercado Pago abrevia el mes) y
+    "31 de julio de 2026" (el encabezado en letras del comprobante de Mercado
+    Pago, que es donde vive la fecha del PAGO — el resto del PDF solo trae el
+    vencimiento de la factura).
     """
     s = str(token).strip().lower()
-    m = re.search(r"(\d{1,2})\s*[/\-]\s*([a-záéíóú]{3,}|\d{1,2})\s*[/\-]\s*(\d{2,4})", s)
+    m = re.search(
+        rf"(\d{{1,2}}){_SEP_FECHA}([a-záéíóú]{{3,}}|\d{{1,2}}){_SEP_FECHA}(\d{{2,4}})", s
+    )
     if not m:
         raise MontoInvalido(f"fecha no reconocida: {token!r}")
 

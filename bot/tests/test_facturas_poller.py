@@ -15,8 +15,8 @@ import pytest
 
 from bot.facturas_poller import (
     descargar_factura_aysa, descargar_factura_edenor, descargar_factura_personal,
-    descargar_pdf, pdf_de_factura, poll_facturas_once, procesar_email_factura,
-    resolver_expensas,
+    descargar_factura_consorcio, descargar_pdf, pdf_de_factura, poll_facturas_once,
+    procesar_email_factura, resolver_expensas,
 )
 from bot.tools.alertas import resetear_dedup
 from bot.tools.expensas_pdf import ExpensasNoParseable, FilaUnidad
@@ -210,6 +210,9 @@ def test_prueba_los_pdfs_hasta_encontrar_la_unidad():
     assert f.monto == pytest.approx(258198.55)
     assert f.vencimiento == date(2026, 8, 10)
     assert f.identificador == ""  # se rutea por slug
+    # Solo la URL que resultó tener la unidad, no la de gastos del consorcio:
+    # es la que después se archiva como la factura del mes.
+    assert f.pdf_urls == ("https://s3/unidades",)
 
 
 @pytest.mark.unit
@@ -604,3 +607,67 @@ def test_el_pdf_del_mes_pasado_de_edenor_no_se_archiva():
                return_value="Cuenta 5 255 064 586 TOTALAPAGAR $ 12.000,00"):
         with pytest.raises(EdenorPdfNoDisponible, match="otra factura"):
             descargar_factura_edenor(EDENOR.pdf_urls[0], EDENOR.identificador, EDENOR.monto)
+
+
+# ──────────────────────────────────────────────
+# PDF de la factura (Consorcio Gallo / expensas)
+# ──────────────────────────────────────────────
+
+CONSORCIO = FacturaParseada(
+    servicio="consorcio_gallo", identificador="", monto=266380.78,
+    vencimiento=date(2026, 9, 10),
+    pdf_urls=("https://simplesolutionscloud.s3.amazonaws.com/liq/255.pdf",),
+)
+
+
+@pytest.mark.unit
+def test_las_expensas_tambien_se_archivan_solas():
+    """
+    Bug real: resolver_expensas bajaba el PDF, lo parseaba y lo tiraba, así que
+    la factura del consorcio nunca tenía documento y su celda en Registro no
+    llegaba nunca a estar completa. Era el único servicio con el PDF ya en la
+    mano y el único que no lo archivaba.
+    """
+    with patch("bot.facturas_poller.descargar_factura_consorcio",
+               return_value=b"%PDF") as consorcio:
+        assert pdf_de_factura(CONSORCIO) == b"%PDF"
+
+    consorcio.assert_called_once_with(CONSORCIO.pdf_urls[0], 266380.78)
+
+
+@pytest.mark.unit
+def test_la_liquidacion_se_verifica_antes_de_archivarse():
+    """Mismo criterio que los otros tres: el importe tiene que ser el de la factura."""
+    otra = FilaUnidad(unidad="255", total=258198.55, vencimiento=date(2026, 8, 10))
+    with patch("bot.facturas_poller.queries.obtener_servicio_por_slug", return_value=SERVICIO_EXP), \
+         patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF"), \
+         patch("bot.facturas_poller.parsear_pdf_unidades", return_value=otra):
+        with pytest.raises(ExpensasNoParseable, match="266.380,78"):
+            descargar_factura_consorcio(CONSORCIO.pdf_urls[0], CONSORCIO.monto)
+
+
+@pytest.mark.unit
+def test_la_liquidacion_correcta_se_devuelve_tal_cual():
+    fila = FilaUnidad(unidad="255", total=266380.78, vencimiento=date(2026, 9, 10))
+    with patch("bot.facturas_poller.queries.obtener_servicio_por_slug", return_value=SERVICIO_EXP), \
+         patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF-expensas"), \
+         patch("bot.facturas_poller.parsear_pdf_unidades", return_value=fila):
+        assert descargar_factura_consorcio(CONSORCIO.pdf_urls[0], CONSORCIO.monto) == b"%PDF-expensas"
+
+
+@pytest.mark.unit
+def test_un_mail_de_expensas_termina_con_el_pdf_colgado_de_la_factura():
+    """El circuito completo, que es lo que estaba roto de punta a punta."""
+    bot = BotFalso()
+    incompleta = FacturaIncompleta(("https://s3/gastos", "https://s3/unidades"))
+    with Ctx(parsear=incompleta) as ctx:
+        with patch("bot.facturas_poller.resolver_expensas", return_value=CONSORCIO), \
+             patch("bot.facturas_poller.archivar_pdf_de_factura",
+                   return_value={"id": "arch-1"}) as archivar:
+            assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    archivar.assert_called_once()
+    assert archivar.call_args[0][0].servicio == "consorcio_gallo"
+    assert archivar.call_args[0][1] == {"id": "fac-1"}
+    ctx.marcar.assert_called_once_with("msg-1")
+    assert "PDF archivado" in bot.mensajes[0]["text"]

@@ -157,11 +157,16 @@ def resolver_expensas(urls: tuple[str, ...]) -> FacturaParseada:
             errores.append(f"{url[-16:]}: encontré la unidad pero no el vencimiento")
             continue
 
+        # `pdf_urls` lleva SOLO la URL que resultó ser la liquidación de la
+        # unidad, no las dos del mail: es la que después se archiva. Sin esto el
+        # PDF de expensas se bajaba, se parseaba y se tiraba, y la factura del
+        # consorcio quedaba para siempre sin documento en la grilla de Registro.
         return FacturaParseada(
             servicio="consorcio_gallo",
             identificador="",  # el mail no trae número: se rutea por slug
             monto=fila.total,
             vencimiento=fila.vencimiento,
+            pdf_urls=(url,),
         )
 
     raise ExpensasNoParseable(
@@ -235,14 +240,44 @@ def descargar_factura_edenor(url: str, identificador: str, monto: float) -> byte
     return pdf
 
 
+def descargar_factura_consorcio(url: str, monto: float) -> bytes:
+    """
+    Re-baja la liquidación de expensas y confirma que siga siendo la de esta
+    factura antes de archivarla.
+
+    Se vuelve a bajar en vez de arrastrar los bytes que ya tenía resolver_expensas:
+    mantiene un solo contrato en pdf_de_factura (URL adentro, bytes afuera) y el
+    archivo es público y chico. La verificación es la misma que hizo el parseo,
+    así que si el consorcio republica el PDF entre una descarga y la otra no pasa
+    desapercibido.
+    """
+    servicio = queries.obtener_servicio_por_slug("consorcio_gallo")
+    unidad = (servicio or {}).get("unidad_funcional")
+    if not unidad:
+        raise ExpensasNoParseable(
+            "el servicio 'consorcio_gallo' no tiene unidad_funcional configurada"
+        )
+
+    pdf = descargar_pdf(url)
+    fila = parsear_pdf_unidades(pdf, unidad)
+    if abs(fila.total - monto) > 0.01:
+        raise ExpensasNoParseable(
+            f"el PDF dice ${formatear_monto_ar(fila.total)} y la factura "
+            f"${formatear_monto_ar(monto)}"
+        )
+    return pdf
+
+
 def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     """
     Baja el PDF con el flujo del servicio que corresponda.
 
     Personal, AySA y Edenor enlazan el PDF con un token que no pide login, cada
-    uno con su flujo. MetroGAS no se puede: su portal es público pero el endpoint
-    del PDF valida un reCAPTCHA en el servidor, así que ese sigue entrando a mano
-    por Telegram. Si mañana se suma otro, acá va el ruteo.
+    uno con su flujo. El consorcio es el más directo: el PDF está en un bucket S3
+    público y resolver_expensas ya lo bajó para sacarle el monto. MetroGAS es el
+    único que no se puede: su portal es público pero el endpoint del PDF valida un
+    reCAPTCHA en el servidor, así que ese sigue entrando a mano por Telegram. Si
+    mañana se suma otro, acá va el ruteo.
     """
     if parseada.servicio == "personal":
         return descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
@@ -252,6 +287,8 @@ def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     if parseada.servicio == "edenor":
         return descargar_factura_edenor(parseada.pdf_urls[0], parseada.identificador,
                                         parseada.monto)
+    if parseada.servicio == "consorcio_gallo":
+        return descargar_factura_consorcio(parseada.pdf_urls[0], parseada.monto)
     raise ValueError(
         f"el servicio {parseada.servicio!r} trae link al PDF pero no tiene "
         f"descarga automática implementada"

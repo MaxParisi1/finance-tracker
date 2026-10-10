@@ -33,14 +33,17 @@ cambiaría.
 
 | Dónde | Qué |
 |---|---|
-| `bot/main.py` | Handlers de Telegram. Solo procesa documentos (PDF/imagen) y los botones de recurrentes; no hay chat. |
+| `bot/main.py` | Handlers de Telegram. Solo procesa documentos (PDF, imagen o foto) y los botones de recurrentes; no hay chat. |
 | `bot/gmail_poller.py` | Mails de bancos y tarjetas → gastos (regex primero, LLM de respaldo). |
 | `bot/facturas_poller.py` | Mails de aviso de factura → fila en `facturas` + PDF a Drive cuando se puede bajar. |
-| `bot/tools/documentos.py` | Identifica un PDF suelto: servicio, tipo (factura/comprobante), monto y fecha. |
+| `bot/tools/documentos.py` | Identifica un documento suelto: servicio, tipo (factura/comprobante), monto y fecha. De una imagen o un PDF escaneado el modelo de visión solo transcribe el texto; la identificación es la misma. |
 | `bot/tools/conciliacion.py` | Elige a qué factura pendiente corresponde un documento. |
 | `bot/tools/archivado.py` | Orquesta: Drive + fila en `archivos_drive` + gasto + saldar la factura. |
+| `bot/tools/estado.py` | Lo que tiene que sobrevivir a un reinicio (tabla `bot_estado`): marca del recordatorio diario, salud de cada poller y mails sin procesar. La web lo lee para la bandeja del Panel. |
 | `bot/db/queries.py` | Todo el acceso a Supabase del bot. |
-| `web/src/lib/queries.ts` | Todo el acceso de lectura de la web. |
+| `web/src/lib/queries.ts` | Todo el acceso de lectura de la web. Lo que puede pasar de 1000 filas va por `traerTodo` (Supabase corta ahí sin avisar). |
+| `web/src/lib/fechas.ts` | "Hoy" en hora argentina. En código de servidor nunca `new Date()` para saber el día o el mes: Vercel corre en UTC. |
+| `web/src/lib/nav.ts` | Las cinco secciones del menú y las pestañas de cada una. |
 | `web/src/app/*/actions.ts` | Server actions (escrituras). |
 | `supabase/migrations/` | Esquema, numerado. Se aplican a mano. |
 
@@ -85,6 +88,10 @@ Es la parte que más bugs dio; conviene tenerla clara antes de tocarla.
   identificador) y tiene un paso extra, el borrador de mail a la administración.
 
 ## Convenciones
+
+- El bot no guarda en memoria nada que importe después de un reinicio (cada
+  `deploy-bot` lo reinicia). Va a `bot_estado`, o viaja completo en el
+  `callback_data` del botón.
 
 - Los fixes llevan un test que reproduce el caso real, con un docstring que
   cuenta el bug ("Bug real: ..."). Los tests unitarios mockean Drive y la base

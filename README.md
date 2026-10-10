@@ -33,6 +33,12 @@ OPENROUTER_API_KEY=...  # secundario — https://openrouter.ai  (opcional, hoy s
 
 Opcionalmente `GROQ_MODEL` / `OPENROUTER_MODEL` para pisar los modelos por defecto.
 
+Las fotos y los PDFs escaneados se leen con un segundo modelo de Groq que acepta
+imágenes (`qwen/qwen3.8-27b`, también free tier; se pisa con `GROQ_VISION_MODEL`).
+Solo transcribe el texto: de qué servicio es el documento lo decide el mismo
+código que lee los PDFs. No tiene proveedor de respaldo: si Groq lo da de baja,
+el bot contesta que no pudo leer la imagen y el smoke test avisa qué modelo falta.
+
 Límites del free tier de Groq sobre `openai/gpt-oss-120b`: 30 req/min, 1.000
 req/día, 8.000 tokens/min, 200.000 tokens/día. El único que se puede llegar a
 tocar es el de tokens por minuto, si entra un lote grande de emails de golpe; da

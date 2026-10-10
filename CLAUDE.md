@@ -1,0 +1,96 @@
+# Finance Tracker
+
+Finanzas personales de un solo usuario: un bot de Telegram (`bot/`, Python) que
+registra gastos y archiva documentos, y un dashboard (`web/`, Next.js 14 App
+Router) que los muestra. Los dos hablan con la misma Supabase; no hay API entre
+ellos. Código, comentarios, commits y tests van en español.
+
+El README cubre deploy, variables de entorno y proveedores de LLM. Acá va lo que
+hace falta para tocar el código sin releerlo.
+
+## Comandos
+
+```bash
+# Tests del bot (desde la raíz; sin PYTHONPATH no encuentra el paquete `bot`)
+PYTHONPATH=. bot/.venv/bin/python -m pytest bot/tests -q
+
+# Web
+cd web && npx tsc --noEmit      # type-check
+cd web && npm run dev           # apunta a la Supabase de PRODUCCIÓN
+```
+
+No hay base de desarrollo: `bot/.env` y `web/.env.local` apuntan a producción.
+Cualquier script que escriba, primero en modo solo-lectura y mostrando qué
+cambiaría.
+
+## Deploy
+
+- Web: Vercel deploya solo con cada push a `main`.
+- Bot: systemd en un servidor Oracle, con `deploy-bot` (alias del usuario). Un
+  cambio en `bot/` no corre en producción hasta ese deploy.
+
+## Mapa
+
+| Dónde | Qué |
+|---|---|
+| `bot/main.py` | Handlers de Telegram. Solo procesa documentos (PDF/imagen) y los botones de recurrentes; no hay chat. |
+| `bot/gmail_poller.py` | Mails de bancos y tarjetas → gastos (regex primero, LLM de respaldo). |
+| `bot/facturas_poller.py` | Mails de aviso de factura → fila en `facturas` + PDF a Drive cuando se puede bajar. |
+| `bot/tools/documentos.py` | Identifica un PDF suelto: servicio, tipo (factura/comprobante), monto y fecha. |
+| `bot/tools/conciliacion.py` | Elige a qué factura pendiente corresponde un documento. |
+| `bot/tools/archivado.py` | Orquesta: Drive + fila en `archivos_drive` + gasto + saldar la factura. |
+| `bot/db/queries.py` | Todo el acceso a Supabase del bot. |
+| `web/src/lib/queries.ts` | Todo el acceso de lectura de la web. |
+| `web/src/app/*/actions.ts` | Server actions (escrituras). |
+| `supabase/migrations/` | Esquema, numerado. Se aplican a mano. |
+
+## Modelo de facturas y archivos
+
+Es la parte que más bugs dio; conviene tenerla clara antes de tocarla.
+
+- `servicios`: los cinco fijos (edenor, metrogas, aysa, personal,
+  consorcio_gallo), cada uno atado a un `gastos_recurrentes`.
+- `facturas`: una por servicio y vencimiento. `estado` pendiente → pagada, y al
+  pagarse guarda el `gasto_id` del pago. La crea el poller de mails.
+- `archivos_drive`: un PDF en Drive, con DOS vínculos opcionales e
+  independientes:
+  - `gasto_id` — es lo que mira la tab **Comprobantes** ("Vinculado").
+  - `factura_id` — es lo que mira la tab **Registro** (la celda está completa
+    si la factura está paga y tiene un archivo tipo `factura` y uno
+    `comprobante`).
+
+  Un archivo de un servicio fijo tiene que terminar con los dos. Quien escriba
+  uno debe ocuparse del otro: al saldar una factura se propaga el gasto a sus
+  archivos, y al vincular a mano un gasto que saldó una factura se cuelga
+  también de ella.
+
+- El ruteo de un documento es siempre por identificador numérico (cuenta,
+  cliente, CBU) buscado en el texto del PDF, nunca por nombre ni dirección.
+- Un documento nunca se descarta: si no se le encuentra factura se archiva
+  huérfano y se avisa.
+- El orden de llegada no está garantizado. El usuario puede mandar el
+  comprobante antes que la factura, y el PDF puede llegar antes o después del
+  mail de aviso.
+
+### Particularidades por servicio
+
+- **MetroGAS**: el PDF no se puede bajar solo (reCAPTCHA validado en servidor;
+  ver el commit `5ccd85f`), así que la factura siempre la manda el usuario por
+  Telegram. Además el vencimiento no se lee del PDF: sale la fecha de emisión.
+  Por eso una factura tardía se ubica por importe exacto y no por fecha.
+- **Edenor**: también escribe el vencimiento pegado al texto.
+- **Personal Pay**: sus comprobantes pierden los centavos al extraerse. El monto
+  del gasto sale siempre de la factura, no del comprobante.
+- **Consorcio Gallo**: no tiene número de cuenta en el mail (el remitente es el
+  identificador) y tiene un paso extra, el borrador de mail a la administración.
+
+## Convenciones
+
+- Los fixes llevan un test que reproduce el caso real, con un docstring que
+  cuenta el bug ("Bug real: ..."). Los tests unitarios mockean Drive y la base
+  (ver la clase `Entorno` en `bot/tests/test_archivado.py`).
+- Ante la duda no se escribe ni se adivina: se pregunta o se avisa. Un dato
+  faltante se arregla; uno incorrecto contamina el histórico.
+- `emails/`, `facturas/` y `comprobantes/` en la raíz son documentos reales de
+  referencia, ignorados por git. Sirven para probar un parser contra el PDF
+  verdadero.

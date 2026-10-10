@@ -214,6 +214,64 @@ def generar_json(prompt: str, *, max_tokens: int = 1024) -> dict:
 
 
 # ──────────────────────────────────────────────
+# Lectura de imágenes
+# ──────────────────────────────────────────────
+
+# El primario de texto (gpt-oss) no acepta imágenes; este sí, y también está en
+# el free tier de Groq. Mismo riesgo que los demás: si lo dan de baja, el smoke
+# test lista los modelos vivos y se pisa con GROQ_VISION_MODEL.
+MODELO_VISION_DEFAULT = "qwen/qwen3.8-27b"
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+_PROMPT_TRANSCRIPCION = (
+    "Transcribí TODO el texto de esta imagen, tal cual aparece, línea por línea. "
+    "No resumas, no corrijas, no interpretes y no agregues nada. Copiá los números "
+    "dígito por dígito. Si una parte no se lee, escribí [ilegible] en ese lugar."
+)
+
+
+def transcribir_imagen(imagen: bytes, mime_type: str = "image/jpeg") -> str:
+    """
+    Devuelve el texto que se lee en una imagen. Es un OCR, no un extractor: el
+    modelo solo transcribe, y quién es el documento y cuánto dice lo decide el
+    mismo código determinístico que lee los PDFs. Así una imagen no abre una
+    puerta para que un modelo adivine un servicio o un monto.
+
+    Levanta:
+        LLMNoConfigurado: no hay GROQ_API_KEY.
+        LLMUnavailable:   fallo transitorio (cuota, red, 5xx). Reintentar después.
+        APIStatusError:   modelo dado de baja o key inválida; hay que arreglarlo.
+    """
+    import base64
+
+    groq = next(p for p in PROVEEDORES if p.nombre == "groq")
+    if not groq.api_key:
+        raise LLMNoConfigurado(f"Para leer imágenes hace falta {groq.env_key}.")
+
+    modelo = os.environ.get("GROQ_VISION_MODEL", MODELO_VISION_DEFAULT)
+    url = f"data:{mime_type};base64,{base64.b64encode(imagen).decode()}"
+    try:
+        respuesta = _get_cliente(groq).chat.completions.create(
+            model=modelo,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": _PROMPT_TRANSCRIPCION},
+                {"type": "image_url", "image_url": {"url": url}},
+            ]}],
+            temperature=0,
+            max_tokens=4096,
+        )
+    except Exception as e:
+        if _es_transitorio(e):
+            raise LLMUnavailable(f"No pude leer la imagen ahora: {e.__class__.__name__}") from e
+        raise
+    logger.info("LLM: groq/%s transcribió una imagen", modelo)
+    # Si el modelo razona en voz alta, eso no es texto del documento: los números
+    # que "piensa" no pueden llegar al código que busca cuentas y montos.
+    return _THINK_RE.sub("", respuesta.choices[0].message.content or "").strip()
+
+
+# ──────────────────────────────────────────────
 # Smoke test: python -m bot.llm_client
 # ──────────────────────────────────────────────
 
@@ -244,6 +302,9 @@ if __name__ == "__main__":
             print(f"   modelos disponibles: {', '.join(modelos)}")
             if p.modelo not in modelos:
                 print(f"   ⚠  '{p.modelo}' NO está en la lista. Seteá {p.nombre.upper()}_MODEL a uno de arriba.")
+            vision = os.environ.get("GROQ_VISION_MODEL", MODELO_VISION_DEFAULT)
+            if p.nombre == "groq" and vision not in modelos:
+                print(f"   ⚠  el modelo de imágenes '{vision}' NO está en la lista. Seteá GROQ_VISION_MODEL.")
         except Exception as e:
             print(f"   ⚠  no pude listar modelos: {e}")
 

@@ -19,6 +19,7 @@ import logging
 import re
 
 from bot.db import queries
+from bot.tools import estado
 from bot.tools.alertas import alertar_error, escapar_md
 from bot.tools.expensas_pdf import ExpensasNoParseable, parsear_pdf_unidades
 from bot.tools.facturas import (
@@ -471,9 +472,12 @@ async def poll_facturas_once(bot, chat_id: int) -> bool:
 
     for email in emails:
         try:
-            await procesar_email_factura(bot, chat_id, email)
+            resuelto = await procesar_email_factura(bot, chat_id, email)
         except Exception:
             # Un mail que rompe de forma imprevista no puede frenar a los demás.
             logger.exception("Error procesando el mail de factura %s", email.get("id"))
+            resuelto = False
+        if not resuelto:
+            estado.anotar_atascado(LABEL_NAME_FACTURAS, email, "No se pudo registrar la factura")
 
     return True

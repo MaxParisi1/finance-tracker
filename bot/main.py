@@ -104,18 +104,27 @@ async def _archivar_documento_servicio(
     Identifica el documento por el número de cuenta que lleva adentro, lo
     concilia contra la factura abierta y lo archiva en Drive.
 
-    Todo determinístico: si no reconoce el documento no adivina ni escala a un
-    modelo, avisa y no hace nada.
+    La identificación es determinística: si no reconoce el documento no adivina,
+    avisa y no hace nada. De una imagen el modelo solo transcribe el texto; qué
+    documento es lo decide el mismo código que lee los PDFs.
     """
     import asyncio
 
     from bot.tools.archivado import archivar_documento
     from bot.tools.conciliacion import ConciliacionAmbigua
+    from bot.llm_client import LLMUnavailable
     from bot.tools.documentos import DocumentoNoIdentificado, identificar_documento
     from bot.tools.montos import formatear_monto_ar
 
     try:
-        doc_ident = await asyncio.to_thread(identificar_documento, file_bytes)
+        doc_ident = await asyncio.to_thread(identificar_documento, file_bytes, mime_type)
+    except LLMUnavailable:
+        logger.warning("Lector de imágenes no disponible")
+        await update.message.reply_text(
+            "No pude leer la imagen ahora (el lector está sin cuota o caído). "
+            "No archivé nada: reenviámela en un rato, o mandá el PDF."
+        )
+        return
     except DocumentoNoIdentificado as e:
         await update.message.reply_text(
             f"No reconocí este documento: {e}\n\n"
@@ -159,28 +168,35 @@ async def _archivar_documento_servicio(
     lineas.append(f"• Drive: {resultado.archivo.get('drive_folder_path', '')}")
     if resultado.aviso:
         lineas.append(f"⚠️ {resultado.aviso}")
+    if doc_ident.transcripto:
+        lineas.append("👁 Lo leí de una imagen: revisá que el monto y la fecha estén bien.")
 
     await update.message.reply_text("\n".join(lineas), parse_mode="Markdown")
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Procesa documentos de los servicios fijos, de forma 100% determinística.
+    Procesa documentos de los servicios fijos.
 
-    Un PDF se identifica por el número de cuenta que lleva adentro, se concilia
-    contra la factura abierta y se archiva en Drive. Sin LLM y sin preguntas.
+    Un documento se identifica por el número de cuenta que lleva adentro, se
+    concilia contra la factura abierta y se archiva en Drive. Sin preguntas.
     Lo que no se reconoce se rechaza con un mensaje claro: preferimos no hacer
     nada antes que archivar algo en el lugar equivocado.
     """
     if not _is_authorized(update):
         return
 
+    from bot.tools.documentos import IGNORAR, RECHAZAR, accion_para_adjunto
+
     doc = update.message.document
     chat_id = update.effective_chat.id
     mime_type = doc.mime_type or ""
 
-    aceptados = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
-    if mime_type not in aceptados:
+    accion = accion_para_adjunto(mime_type, doc.file_name)
+    if accion == IGNORAR:
+        logger.info("Adjunto de texto ignorado: %s (%s)", doc.file_name, mime_type)
+        return
+    if accion == RECHAZAR:
         await update.message.reply_text(
             "Puedo procesar PDFs e imágenes de facturas y comprobantes de tus servicios fijos."
         )
@@ -192,6 +208,38 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     file_bytes = await file.download_as_bytearray()
 
     await _archivar_documento_servicio(update, bytes(file_bytes), mime_type)
+
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Una foto mandada "como foto" (no como archivo). Telegram la entrega aparte de
+    los documentos, comprimida a JPEG y en varios tamaños: se toma el más grande.
+    """
+    if not _is_authorized(update):
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+
+    file = await context.bot.get_file(update.message.photo[-1].file_id)
+    file_bytes = await file.download_as_bytearray()
+
+    await _archivar_documento_servicio(update, bytes(file_bytes), "image/jpeg")
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Red de contención: un fallo que ningún handler atajó (por ejemplo, un archivo
+    demasiado grande para bajarlo de Telegram) no puede dejar al usuario sin
+    respuesta, que se lee como "el bot está roto".
+    """
+    logger.error("Error no manejado en un handler", exc_info=context.error)
+    mensaje = getattr(update, "effective_message", None)
+    if mensaje is None:
+        return
+    try:
+        await mensaje.reply_text("Algo falló procesando eso y no guardé nada. Probá de nuevo.")
+    except Exception:
+        logger.exception("No pude avisar del error")
 
 
 # ──────────────────────────────────────────────
@@ -223,6 +271,8 @@ async def _run() -> None:
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CallbackQueryHandler(match_callback_handler, pattern=r"^mr:"))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_error_handler(error_handler)
     # Lo único que el bot procesa de entrada son documentos y los botones de
     # recurrentes. El resto contesta qué sí puede hacer, en vez de ignorarlo.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, sin_chat_handler))

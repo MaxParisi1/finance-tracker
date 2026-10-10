@@ -13,7 +13,8 @@ import pytest
 
 from bot.tools.documentos import (
     TIPO_COMPROBANTE, TIPO_FACTURA, DocumentoNoIdentificado, _fecha_documento,
-    aplanar, detectar_tipo, identificar_documento, identificar_servicio,
+    accion_para_adjunto, aplanar, detectar_tipo, identificar_documento,
+    identificar_servicio,
 )
 
 # ── Identificadores tal como quedan en servicios_identificadores ──────────────
@@ -253,10 +254,85 @@ def test_factura_de_edenor_toma_el_primer_monto_no_el_recargado():
 
 
 @pytest.mark.unit
-def test_pdf_escaneado_sin_texto_pide_otra_via():
-    with patch("bot.tools.documentos.extraer_texto_pdf", return_value="   "):
-        with pytest.raises(DocumentoNoIdentificado, match="escaneo"):
-            identificar_documento(b"%PDF-fake")
+def test_foto_de_un_comprobante_se_identifica_igual_que_el_pdf():
+    """
+    Bug real: una imagen mandada como archivo iba derecho al lector de PDF, que
+    reventaba, y el bot contestaba "No pude leer el archivo". El /help decía que
+    aceptaba fotos. Ahora la imagen se transcribe y sigue el mismo camino.
+    """
+    with patch("bot.llm_client.transcribir_imagen", return_value=COMPROBANTE_EDENOR) as ocr, \
+         patch("bot.tools.documentos.extraer_texto_pdf") as pdf, \
+         patch("bot.tools.documentos.queries.listar_identificadores_servicios",
+               return_value=IDENTIFICADORES):
+        doc = identificar_documento(b"\xff\xd8jpeg", "image/jpeg")
+
+    ocr.assert_called_once_with(b"\xff\xd8jpeg", "image/jpeg")
+    pdf.assert_not_called()
+    assert doc.servicio["slug"] == "edenor"
+    assert doc.tipo == TIPO_COMPROBANTE
+    assert doc.monto == pytest.approx(13405.84)
+    # Marca para que el bot pida verificar monto y fecha.
+    assert doc.transcripto is True
+
+
+@pytest.mark.unit
+def test_un_pdf_con_texto_no_pide_verificacion():
+    assert _identificar(COMPROBANTE_EDENOR).transcripto is False
+
+
+@pytest.mark.unit
+def test_una_foto_grande_se_achica_antes_de_mandarla():
+    """Una foto de cámara como archivo supera el tope del modelo y no se arregla reintentando."""
+    import io
+    from PIL import Image
+    from bot.tools.documentos import _achicar
+
+    buf = io.BytesIO()
+    Image.new("RGB", (6000, 4000), "white").save(buf, format="PNG")
+    chica, mime = _achicar(buf.getvalue(), "image/png")
+
+    assert mime == "image/jpeg"
+    assert max(Image.open(io.BytesIO(chica)).size) == 2000
+
+
+@pytest.mark.unit
+def test_foto_con_un_digito_mal_leido_no_se_archiva():
+    """
+    La transcripción puede errar un dígito. El identificador tiene que coincidir
+    exacto con uno conocido, así que un número mal leído no rutea a ningún lado
+    en vez de caer en el servicio equivocado.
+    """
+    mal_leido = COMPROBANTE_EDENOR.replace("5255064586", "5255064566")
+    with patch("bot.llm_client.transcribir_imagen", return_value=mal_leido), \
+         patch("bot.tools.documentos.queries.listar_identificadores_servicios",
+               return_value=IDENTIFICADORES):
+        with pytest.raises(DocumentoNoIdentificado):
+            identificar_documento(b"png", "image/png")
+
+
+@pytest.mark.unit
+def test_pdf_escaneado_se_lee_pagina_por_pagina():
+    """
+    Bug real: el error de un PDF sin texto decía "mandalo como foto para leerlo
+    con visión", y la visión no existía. Ahora el escaneo se rasteriza y se lee.
+    """
+    with patch("bot.tools.documentos.extraer_texto_pdf", return_value="   "), \
+         patch("bot.tools.documentos._pdf_a_imagenes", return_value=[b"p1", b"p2"]), \
+         patch("bot.llm_client.transcribir_imagen",
+               side_effect=["Comprobante de pago\n$ 30.56217\nAysa", "Cuenta de servicios 1929557"]) as ocr, \
+         patch("bot.tools.documentos.queries.listar_identificadores_servicios",
+               return_value=IDENTIFICADORES):
+        doc = identificar_documento(b"%PDF-fake")
+
+    assert ocr.call_count == 2
+    assert doc.servicio["slug"] == "aysa"
+
+
+@pytest.mark.unit
+def test_imagen_sin_texto_avisa_y_no_adivina():
+    with patch("bot.llm_client.transcribir_imagen", return_value="  "):
+        with pytest.raises(DocumentoNoIdentificado, match="ningún texto"):
+            identificar_documento(b"png", "image/png")
 
 
 @pytest.mark.unit
@@ -368,3 +444,35 @@ def test_centavos_en_linea_aparte_quedan_fuera_del_monto():
     doc = _identificar(texto)
     assert doc.monto == pytest.approx(67894.00)
     assert abs(doc.monto - 67894.40) < 1.0  # dentro de la tolerancia de conciliación
+
+
+# ──────────────────────────────────────────────
+# Qué se hace con cada adjunto
+# ──────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_el_txt_que_acompania_al_pdf_de_personal_pay_se_ignora():
+    """
+    Bug real: al compartir un comprobante desde Personal Pay llegan dos archivos,
+    el PDF y un .txt. El bot contestaba al .txt "Puedo procesar PDFs e
+    imágenes...", así que cada pago generaba un mensaje de error de más.
+    """
+    assert accion_para_adjunto("text/plain", "comprobante.txt") == "ignorar"
+    # Algunos clientes no informan el tipo: alcanza con la extensión.
+    assert accion_para_adjunto(None, "Comprobante.TXT") == "ignorar"
+    assert accion_para_adjunto("application/octet-stream", "nota.txt") == "ignorar"
+    # Solo el .txt: otro archivo de texto (un .csv, un .html) merece respuesta.
+    assert accion_para_adjunto("text/csv", "movimientos.csv") == "rechazar"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mime", ["application/pdf", "image/jpeg", "image/png", "image/webp"])
+def test_pdf_e_imagenes_se_procesan(mime):
+    assert accion_para_adjunto(mime, "archivo") == "procesar"
+
+
+@pytest.mark.unit
+def test_un_formato_desconocido_se_rechaza_avisando():
+    """Ignorar en silencio es solo para el .txt: un .docx merece respuesta."""
+    assert accion_para_adjunto("application/zip", "facturas.zip") == "rechazar"
+    assert accion_para_adjunto(None, None) == "rechazar"

@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 
-from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME_VISA
+from bot.tools.gmail_reader import get_unread_bank_emails, mark_as_read, LABEL_NAME, LABEL_NAME_VISA
 from bot.llm_client import LLMUnavailable, generar_json
 from bot.tools.gastos import eliminar_gasto, guardar_gasto, historial_comercio
 from bot.tools.montos import parse_monto_ar
@@ -20,6 +20,7 @@ from bot.tools.tarjetas import resolver_medio_pago, nombre_tarjeta
 from bot.db.queries import (
     buscar_gasto_para_reverso, existe_gasto_con_email, obtener_categorias_activas,
 )
+from bot.tools import estado
 from bot.tools import recurrentes_matcher as matcher
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,7 @@ async def poll_gmail_once(bot, chat_id: int) -> bool:
                 data = await asyncio.to_thread(_parse_email_con_llm, email)
             except Exception:
                 logger.exception("Fallo transitorio parseando email %s (no se marca leído)", email["id"])
+                estado.anotar_atascado(LABEL_NAME, email, "El lector no pudo extraer la transacción")
                 await _alertar_email_no_procesado(bot, chat_id, email)
                 continue
 
@@ -388,6 +390,7 @@ async def poll_gmail_once(bot, chat_id: int) -> bool:
 
         except Exception:
             logger.exception(f"Error procesando email {email['id']}")
+            estado.anotar_atascado(LABEL_NAME, email, "Error inesperado al procesarlo")
 
     return True
 
@@ -421,6 +424,7 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
             if parsed is None:
                 # Formato desconocido: notificar (una sola vez) y NO marcar como leído
                 # para revisión manual.
+                estado.anotar_atascado(LABEL_NAME_VISA, email, "Formato de mail no reconocido")
                 if email["id"] not in _emails_alertados:
                     _emails_alertados.add(email["id"])
                     subject = _escape_md(email.get("subject", "(sin asunto)"))
@@ -442,7 +446,10 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
                 continue
 
             if parsed.get("_reverso"):
-                await _procesar_reverso(bot, chat_id, email, parsed)
+                if not await _procesar_reverso(bot, chat_id, email, parsed):
+                    estado.anotar_atascado(
+                        LABEL_NAME_VISA, email, "Reverso sin el consumo que anula"
+                    )
                 continue
 
             sufijo = parsed["sufijo"]
@@ -459,6 +466,7 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
                 logger.exception(
                     "Fallo enriqueciendo email Visa %s (no se marca leído)", email["id"]
                 )
+                estado.anotar_atascado(LABEL_NAME_VISA, email, "El lector no pudo categorizarlo")
                 await _alertar_email_no_procesado(bot, chat_id, email)
                 continue
 
@@ -497,6 +505,7 @@ async def poll_visa_once(bot, chat_id: int) -> bool:
 
         except Exception:
             logger.exception(f"Error procesando email Visa {email['id']}")
+            estado.anotar_atascado(LABEL_NAME_VISA, email, "Error inesperado al procesarlo")
 
     return True
 
@@ -508,8 +517,8 @@ async def start_gmail_polling(bot, chat_id: int) -> None:
 
     logger.info("Gmail pollers iniciados (intervalo: %ds)", POLL_INTERVAL)
     await asyncio.gather(
-        _loop_poll(bot, chat_id, poll_gmail_once, "Consumos"),
-        _loop_poll(bot, chat_id, poll_visa_once, "Consumos_visa"),
+        _loop_poll(bot, chat_id, poll_gmail_once, LABEL_NAME),
+        _loop_poll(bot, chat_id, poll_visa_once, LABEL_NAME_VISA),
         _loop_poll(bot, chat_id, poll_facturas_once, LABEL_NAME_FACTURAS),
         loop_recordatorios(bot, chat_id),
     )
@@ -531,11 +540,14 @@ async def _loop_poll(bot, chat_id: int, poll_fn, nombre: str) -> None:
     fallos = 0
     alertado = False
     while True:
+        estado.empezar_ciclo(nombre)
         try:
             ok = await poll_fn(bot, chat_id)
         except Exception:
             logger.exception("Error inesperado en poller %s", nombre)
             ok = False
+        # Para la bandeja de la web: salud del poller y mails que dejó pendientes.
+        await asyncio.to_thread(estado.cerrar_ciclo, nombre, ok)
 
         if ok:
             if alertado:

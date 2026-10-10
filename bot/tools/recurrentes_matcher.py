@@ -8,9 +8,11 @@ Matching entre gastos de Gmail y gastos_recurrentes en 4 capas:
 Filtros duros previos: moneda exacta, monto ±20%, fecha ±12 días del proximo_vencimiento.
 """
 
+import base64
 import calendar
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -27,9 +29,6 @@ MONTO_TOL = 0.20        # variación "cómoda"; dentro de esto no se penaliza
 MONTO_TOL_HARD = 0.60   # rechazo duro solo si el monto difiere muchísimo
 FECHA_WINDOW = 25       # días; ventana holgada para cadencias irregulares (antes 12)
 
-# Confirmaciones pendientes de respuesta del usuario.
-# key: "{gasto_id[:8]}:{rec_id[:8]}"  →  (gasto_id, rec_id, comercio, monto, fecha)
-_pending: dict[str, tuple[str, str, str, float, str | None]] = {}
 
 
 # ──────────────────────────────────────────────
@@ -261,8 +260,33 @@ def confirmar_vinculacion(
 # Confirmación por Telegram
 # ──────────────────────────────────────────────
 
-def _pending_key(gasto_id: str, rec_id: str) -> str:
-    return f"{gasto_id[:8]}:{rec_id[:8]}"
+def _empaquetar(gasto_id: str, rec_id: str) -> str:
+    """
+    Los dos UUID enteros, comprimidos para entrar en los 64 bytes que Telegram
+    permite en callback_data ("mr:y:" + 22 + ":" + 22 = 50).
+
+    El botón lleva todo lo necesario para resolverse solo. Antes guardaba una
+    clave corta y el resto vivía en un dict en memoria, así que cada reinicio
+    del bot dejaba muertas las confirmaciones que estaban esperando respuesta.
+    """
+    def corto(valor: str) -> str:
+        return base64.urlsafe_b64encode(uuid.UUID(str(valor)).bytes).rstrip(b"=").decode()
+
+    return f"{corto(gasto_id)}:{corto(rec_id)}"
+
+
+def _desempaquetar(key: str) -> tuple[str, str] | None:
+    """Inverso de _empaquetar. None si la clave no tiene ese formato."""
+    partes = key.split(":")
+    if len(partes) != 2:
+        return None
+    try:
+        gasto_id, rec_id = (
+            str(uuid.UUID(bytes=base64.urlsafe_b64decode(p + "=="))) for p in partes
+        )
+    except (ValueError, TypeError):
+        return None
+    return gasto_id, rec_id
 
 
 async def solicitar_confirmacion_telegram(bot, chat_id: int, gasto: dict, candidato: CandidatoMatch) -> None:
@@ -270,9 +294,7 @@ async def solicitar_confirmacion_telegram(bot, chat_id: int, gasto: dict, candid
 
     gasto_id = gasto['id']
     rec_id = candidato.recurrente['id']
-    comercio = gasto.get('comercio') or gasto.get('descripcion') or ''
-    key = _pending_key(gasto_id, rec_id)
-    _pending[key] = (gasto_id, rec_id, comercio, gasto.get('monto_original', 0), gasto.get('fecha'))
+    key = _empaquetar(gasto_id, rec_id)
 
     comercio = gasto.get('comercio') or gasto.get('descripcion') or '?'
     monto = gasto.get('monto_original', 0)
@@ -311,11 +333,22 @@ async def procesar_callback(query) -> str:
         return "Acción desconocida."
 
     _, accion, key = parts
-    ids = _pending.pop(key, None)
+    ids = _desempaquetar(key)
     if ids is None:
-        return "Esta confirmación ya fue procesada o expiró."
+        # Botón de un mensaje anterior a este formato: no hay cómo resolverlo.
+        return "Esta confirmación expiró. Vinculá el gasto desde la web."
 
-    gasto_id, rec_id, comercio, monto, fecha = ids
+    gasto_id, rec_id = ids
+
+    gasto = queries.obtener_gasto_por_id(gasto_id)
+    if gasto is None:
+        return "Ese gasto ya no existe (¿lo borraste?). No vinculé nada."
+    if gasto.get('recurrente_id'):
+        return "Este gasto ya está vinculado a un recurrente."
+
+    comercio = gasto.get('comercio') or gasto.get('descripcion') or ''
+    monto = gasto.get('monto_original')
+    fecha = gasto.get('fecha')
 
     if accion == 'n':
         return "Entendido, no se vinculó."

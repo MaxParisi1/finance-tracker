@@ -11,7 +11,6 @@ Estructura de carpetas:
 
 import io
 import os
-import json
 import logging
 import unicodedata
 import re
@@ -241,47 +240,6 @@ class DriveManager:
         extension = extension.lstrip(".")
 
         return f"{fecha_str}_{comercio_norm}_{tipo}.{extension}"
-
-    def list_root_folders(self) -> list[str]:
-        """Lista las carpetas de primer nivel dentro del root folder."""
-        query = (
-            f"'{self._root_folder_id}' in parents and "
-            f"mimeType='application/vnd.google-apps.folder' and "
-            f"trashed=false"
-        )
-        results = self._service.files().list(
-            q=query, fields="files(id, name)", spaces="drive", orderBy="name"
-        ).execute()
-        return [f["name"] for f in results.get("files", [])]
-
-    def delete_file(self, file_id: str) -> None:
-        """Elimina un archivo de Drive por su ID."""
-        self._service.files().delete(fileId=file_id).execute()
-
-    def check_duplicate(self, filename: str, folder_id: str) -> dict | None:
-        """
-        Verifica si ya existe un archivo con el mismo nombre en la carpeta.
-
-        Returns:
-            Dict con info del archivo existente, o None si no existe.
-        """
-        query = (
-            f"name='{filename}' and "
-            f"'{folder_id}' in parents and "
-            f"trashed=false"
-        )
-        results = self._service.files().list(
-            q=query, fields="files(id, name, webViewLink)", spaces="drive"
-        ).execute()
-
-        files = results.get("files", [])
-        if files:
-            return {
-                "file_id": files[0]["id"],
-                "file_name": files[0]["name"],
-                "web_view_link": files[0].get("webViewLink", ""),
-            }
-        return None
 
 
 # Singleton global (se inicializa lazy)

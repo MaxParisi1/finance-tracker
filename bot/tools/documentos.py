@@ -28,8 +28,32 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DocumentoIdentificado", "DocumentoNoIdentificado", "TIPO_FACTURA",
     "TIPO_COMPROBANTE", "aplanar", "detectar_tipo", "identificar_servicio",
-    "extraer_texto_pdf", "identificar_documento",
+    "extraer_texto_pdf", "extraer_texto", "identificar_documento",
+    "MIME_ACEPTADOS", "accion_para_adjunto",
 ]
+
+MIME_ACEPTADOS = frozenset({"application/pdf", "image/jpeg", "image/png", "image/webp"})
+
+PROCESAR, IGNORAR, RECHAZAR = "procesar", "ignorar", "rechazar"
+
+
+def accion_para_adjunto(mime_type: str | None, nombre: str | None = None) -> str:
+    """
+    Qué hacer con un archivo que llega por Telegram.
+
+    Los .txt se ignoran sin contestar: al compartir un comprobante desde Personal
+    Pay, la app manda el PDF y además un .txt con el texto del "compartir". Ese
+    segundo archivo no es un documento y contestarle era ruido en cada pago.
+    """
+    mime = (mime_type or "").lower()
+    if mime in MIME_ACEPTADOS:
+        return PROCESAR
+    if mime == "text/plain" or (nombre or "").lower().endswith(".txt"):
+        return IGNORAR
+    return RECHAZAR
+
+# Un escaneo de más páginas que esto no es una factura de servicio.
+_MAX_PAGINAS_ESCANEO = 3
 
 TIPO_FACTURA = "factura"
 TIPO_COMPROBANTE = "comprobante"
@@ -60,6 +84,9 @@ class DocumentoIdentificado:
     identificador: str
     monto: float | None = None
     fecha: object | None = None  # datetime.date
+    # True si el texto salió de transcribir una imagen: puede traer un dígito
+    # mal leído, así que quien lo muestre tiene que pedir que se verifique.
+    transcripto: bool = False
 
 
 def aplanar(texto: str) -> str:
@@ -222,16 +249,80 @@ def extraer_texto_pdf(pdf_bytes: bytes) -> str:
         return "\n".join((p.extract_text() or "") for p in pdf.pages)
 
 
-def identificar_documento(pdf_bytes: bytes) -> DocumentoIdentificado:
+# Lado mayor de lo que se le manda al modelo. Alcanza de sobra para leer una
+# factura y deja la imagen muy por debajo del tope de tamaño de la API.
+_LADO_MAXIMO = 2000
+
+
+def _achicar(imagen: bytes, mime_type: str) -> tuple[bytes, str]:
     """
-    Identifica un PDF suelto. Levanta DocumentoNoIdentificado si algo no cierra;
-    el caller le pregunta al usuario en vez de adivinar.
+    Reduce la imagen y la pasa a JPEG. Una foto de cámara mandada como archivo
+    puede pesar más de lo que acepta el modelo, y ese error no se arregla
+    reintentando. Si no se puede abrir, se manda como vino.
     """
-    texto = extraer_texto_pdf(pdf_bytes)
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(imagen)) as img:
+            img = img.convert("RGB")
+            img.thumbnail((_LADO_MAXIMO, _LADO_MAXIMO))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+        return buf.getvalue(), "image/jpeg"
+    except Exception:
+        logger.warning("No pude achicar la imagen; se envía tal cual")
+        return imagen, mime_type
+
+
+def _pdf_a_imagenes(pdf_bytes: bytes) -> list[bytes]:
+    """Rasteriza un PDF a un PNG por página. Usa poppler, que el servidor ya tiene."""
+    from pdf2image import convert_from_bytes
+
+    imagenes = []
+    for pagina in convert_from_bytes(pdf_bytes, dpi=200, last_page=_MAX_PAGINAS_ESCANEO):
+        buf = io.BytesIO()
+        pagina.save(buf, format="PNG")
+        imagenes.append(buf.getvalue())
+    return imagenes
+
+
+def _extraer(archivo: bytes, mime_type: str) -> tuple[str, bool]:
+    """Texto del documento y si hubo que transcribirlo desde una imagen."""
+    from bot.llm_client import transcribir_imagen
+
+    if mime_type != "application/pdf":
+        return transcribir_imagen(*_achicar(archivo, mime_type)), True
+
+    texto = extraer_texto_pdf(archivo)
+    if texto.strip():
+        return texto, False
+
+    logger.info("PDF sin capa de texto: se lee como escaneo")
+    paginas = [transcribir_imagen(*_achicar(img, "image/png")) for img in _pdf_a_imagenes(archivo)]
+    return "\n".join(paginas), True
+
+
+def extraer_texto(archivo: bytes, mime_type: str = "application/pdf") -> str:
+    """
+    Texto de un documento, sea PDF o imagen.
+
+    Un PDF con texto se lee directo. Una imagen, o un PDF escaneado (sin capa de
+    texto), se transcribe con el modelo de visión. En los dos casos lo que sale
+    es solo texto: la identificación corre después y es la misma para todos.
+    """
+    return _extraer(archivo, mime_type)[0]
+
+
+def identificar_documento(
+    archivo: bytes, mime_type: str = "application/pdf"
+) -> DocumentoIdentificado:
+    """
+    Identifica un documento suelto (PDF o imagen). Levanta DocumentoNoIdentificado
+    si algo no cierra; el caller le pregunta al usuario en vez de adivinar.
+    """
+    texto, transcripto = _extraer(archivo, mime_type)
     if not texto.strip():
-        raise DocumentoNoIdentificado(
-            "el PDF no tiene texto (¿es un escaneo?). Mandalo como foto para leerlo con visión."
-        )
+        raise DocumentoNoIdentificado("no pude leer ningún texto en el archivo.")
 
     ident = identificar_servicio(texto, queries.listar_identificadores_servicios())
     tipo = detectar_tipo(texto)
@@ -242,6 +333,7 @@ def identificar_documento(pdf_bytes: bytes) -> DocumentoIdentificado:
         identificador=ident["valor"],
         monto=_primer_monto(texto),
         fecha=_fecha_documento(texto, tipo),
+        transcripto=transcripto,
     )
     logger.info(
         "Documento identificado: %s · %s · $%s",

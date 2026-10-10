@@ -14,3 +14,5 @@ google-auth-oauthlib>=1.2.0
 # Descarga de los PDFs de expensas. Ya venía como dependencia transitiva de
 # google-api-python-client; se declara explícito porque lo usamos directo.
 requests>=2.32.0
+# tipo_cambio.py lo usa directo; venía de arrastre con openai y supabase.
+httpx>=0.27.0

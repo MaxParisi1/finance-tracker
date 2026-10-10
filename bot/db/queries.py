@@ -91,12 +91,6 @@ def obtener_gasto_por_id(gasto_id: str) -> dict | None:
     return res.data[0] if res.data else None
 
 
-def actualizar_gasto(gasto_id: str, campos: dict) -> dict:
-    client = get_client()
-    res = client.table("gastos").update(campos).eq("id", gasto_id).execute()
-    return res.data[0]
-
-
 def obtener_comercios() -> list[str]:
     """Devuelve todos los nombres de comercio distintos, ordenados alfabéticamente."""
     client = get_client()
@@ -158,11 +152,6 @@ def buscar_gasto_para_reverso(
 # ──────────────────────────────────────────────
 # Gastos recurrentes
 # ──────────────────────────────────────────────
-
-def insertar_recurrente(recurrente: dict) -> dict:
-    client = get_client()
-    res = client.table("gastos_recurrentes").insert(recurrente).execute()
-    return res.data[0]
 
 
 def obtener_recurrentes_activos() -> list[dict]:
@@ -269,24 +258,6 @@ def insertar_tipo_cambio(fecha: str, tipo: str, valor: float) -> None:
     ).execute()
 
 
-# NOTA: acá vivían cargar_historial_bot/guardar_historial_bot, que persistían el
-# historial del agente conversacional en la tabla `bot_sessions`. Se eliminaron
-# junto con el agente. La tabla sigue existiendo en Supabase con los datos
-# viejos; borrarla es seguro pero es una decisión aparte.
-
-
-def obtener_tipo_cambio_historico(fecha: str, tipo: str) -> float | None:
-    client = get_client()
-    res = (
-        client.table("tipos_cambio_historico")
-        .select("valor")
-        .eq("fecha", fecha)
-        .eq("tipo", tipo)
-        .execute()
-    )
-    return res.data[0]["valor"] if res.data else None
-
-
 # ──────────────────────────────────────────────
 # Archivos Drive (comprobantes/facturas)
 # ──────────────────────────────────────────────
@@ -300,138 +271,6 @@ def insertar_archivo_drive(archivo: dict) -> dict:
         archivo.get("drive_file_name"),
     )
     return res.data[0]
-
-
-def obtener_archivos_drive(filtros: dict) -> list[dict]:
-    """
-    Busca archivos en archivos_drive con filtros opcionales.
-    filtros admitidos: comercio (ilike), mes (int), anio (int),
-                       categoria, tipo, fecha_desde, fecha_hasta, gasto_id
-    """
-    client = get_client()
-    q = client.table("archivos_drive").select("*")
-
-    if "comercio" in filtros:
-        term = filtros["comercio"].lower()
-        q = q.ilike("comercio", f"%{term}%")
-
-    if "mes" in filtros and "anio" in filtros:
-        mes = int(filtros["mes"])
-        anio = int(filtros["anio"])
-        fecha_desde = date(anio, mes, 1).isoformat()
-        if mes == 12:
-            fecha_hasta = date(anio + 1, 1, 1).isoformat()
-        else:
-            fecha_hasta = date(anio, mes + 1, 1).isoformat()
-        q = q.gte("fecha", fecha_desde).lt("fecha", fecha_hasta)
-    elif "anio" in filtros:
-        anio = int(filtros["anio"])
-        q = q.gte("fecha", f"{anio}-01-01").lt("fecha", f"{anio + 1}-01-01")
-    elif "fecha_desde" in filtros:
-        q = q.gte("fecha", filtros["fecha_desde"])
-        if "fecha_hasta" in filtros:
-            q = q.lte("fecha", filtros["fecha_hasta"])
-
-    if "categoria" in filtros:
-        q = q.eq("categoria", filtros["categoria"])
-    if "tipo" in filtros:
-        q = q.eq("tipo", filtros["tipo"])
-    if "gasto_id" in filtros:
-        q = q.eq("gasto_id", filtros["gasto_id"])
-
-    q = q.order("fecha", desc=True)
-    res = q.execute()
-    return res.data
-
-
-def sincronizar_fecha_archivos(gasto_id: str, fecha: str) -> None:
-    """Actualiza la fecha de todos los archivos_drive vinculados a un gasto."""
-    client = get_client()
-    client.table("archivos_drive").update({"fecha": fecha}).eq("gasto_id", gasto_id).execute()
-
-
-def vincular_archivo_a_gasto(archivo_id: str, gasto_id: str) -> dict:
-    """Vincula un archivo de Drive con un gasto existente.
-
-    archivo_id puede ser el UUID de Supabase o el drive_file_id de Google Drive.
-    """
-    import re
-    client = get_client()
-    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
-    column = "id" if _UUID_RE.match(archivo_id) else "drive_file_id"
-    res = (
-        client.table("archivos_drive")
-        .update({"gasto_id": gasto_id})
-        .eq(column, archivo_id)
-        .execute()
-    )
-    return res.data[0] if res.data else {}
-
-
-def obtener_archivos_por_gasto(gasto_id: str) -> list[dict]:
-    """Obtiene todos los archivos vinculados a un gasto."""
-    client = get_client()
-    res = (
-        client.table("archivos_drive")
-        .select("*")
-        .eq("gasto_id", gasto_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return res.data
-
-
-def buscar_duplicado_archivo(comercio: str, fecha: str, tipo: str) -> dict | None:
-    """Busca si ya existe un archivo con mismo comercio, fecha y tipo."""
-    client = get_client()
-    res = (
-        client.table("archivos_drive")
-        .select("*")
-        .ilike("comercio", comercio)
-        .eq("fecha", fecha)
-        .eq("tipo", tipo)
-        .execute()
-    )
-    return res.data[0] if res.data else None
-
-
-def contar_archivos_por_gastos(gasto_ids: list[str]) -> dict[str, int]:
-    """Cuenta archivos vinculados para una lista de gasto_ids."""
-    if not gasto_ids:
-        return {}
-    client = get_client()
-    res = (
-        client.table("archivos_drive")
-        .select("gasto_id")
-        .in_("gasto_id", gasto_ids)
-        .execute()
-    )
-    conteo: dict[str, int] = {}
-    for row in res.data:
-        gid = row["gasto_id"]
-        conteo[gid] = conteo.get(gid, 0) + 1
-    return conteo
-
-
-def eliminar_archivo_drive(archivo_id: str) -> dict:
-    """Elimina el registro de un archivo de la base de datos."""
-    client = get_client()
-    client.table("archivos_drive").delete().eq("id", archivo_id).execute()
-    return {"eliminado": True, "id": archivo_id}
-
-
-def desvincular_archivo_drive(archivo_id: str) -> dict:
-    """Desvincula un archivo de su gasto (pone gasto_id = null)."""
-    client = get_client()
-    res = (
-        client.table("archivos_drive")
-        .update({"gasto_id": None})
-        .eq("id", archivo_id)
-        .execute()
-    )
-    if not res.data:
-        return {"error": "No se encontró el archivo."}
-    return {"desvinculado": True, "id": archivo_id}
 
 
 # ──────────────────────────────────────────────
@@ -454,28 +293,6 @@ def insertar_tarjeta(tarjeta: dict) -> dict:
     res = client.table("tarjetas").insert(tarjeta).execute()
     logger.info("Tarjeta creada sufijo=%s tipo=%s", tarjeta.get("sufijo"), tarjeta.get("tipo"))
     return res.data[0]
-
-
-def listar_tarjetas() -> list[dict]:
-    client = get_client()
-    res = (
-        client.table("tarjetas")
-        .select("*")
-        .order("created_at")
-        .execute()
-    )
-    return res.data
-
-
-def actualizar_tarjeta(sufijo: str, campos: dict) -> dict:
-    client = get_client()
-    res = (
-        client.table("tarjetas")
-        .update(campos)
-        .eq("sufijo", sufijo)
-        .execute()
-    )
-    return res.data[0] if res.data else {}
 
 
 # ──────────────────────────────────────────────
@@ -578,18 +395,6 @@ def marcar_factura_pagada(factura_id: str, gasto_id: str, fecha_pago: str) -> di
         return {}
     logger.info("Factura %s pagada con gasto %s", factura_id, gasto_id)
     return res.data[0]
-
-
-def vincular_archivo_a_factura(archivo_id: str, factura_id: str) -> dict:
-    """Cuelga un PDF de la factura, exista o no todavía el gasto."""
-    client = get_client()
-    res = (
-        client.table("archivos_drive")
-        .update({"factura_id": factura_id})
-        .eq("id", archivo_id)
-        .execute()
-    )
-    return res.data[0] if res.data else {}
 
 
 def vincular_archivos_de_factura_a_gasto(factura_id: str, gasto_id: str) -> list[dict]:
@@ -711,3 +516,23 @@ def obtener_facturas_con_archivos(desde: str) -> list[dict]:
         .execute()
     )
     return res.data
+
+
+# ──────────────────────────────────────────────
+# Estado del bot (clave/valor, migración 015)
+# ──────────────────────────────────────────────
+
+def leer_estado(clave: str) -> Any | None:
+    client = get_client()
+    res = client.table("bot_estado").select("valor").eq("clave", clave).execute()
+    return res.data[0]["valor"] if res.data else None
+
+
+def guardar_estado(clave: str, valor: Any) -> None:
+    from datetime import datetime, timezone
+    client = get_client()
+    client.table("bot_estado").upsert(
+        {"clave": clave, "valor": valor,
+         "updated_at": datetime.now(timezone.utc).isoformat()},
+        on_conflict="clave",
+    ).execute()

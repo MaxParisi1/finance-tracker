@@ -15,14 +15,20 @@ impaga. Los de documentación faltante, una vez por semana.
 
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "Aviso", "calcular_avisos", "formatear_avisos",
     "DIAS_AVISO_PREVIO", "CADENCIA_VENCIDA", "DIA_REVISION_SEMANAL",
+    "ZONA", "toca_enviar",
 ]
+
+# El servidor corre en UTC: sin zona explícita "las 9" serían las 6 de la mañana
+# y, entre las 21 y la medianoche, "hoy" ya sería mañana.
+ZONA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 # Días antes del vencimiento en los que se avisa.
 DIAS_AVISO_PREVIO = (3, 1, 0)
@@ -165,15 +171,20 @@ HORA_ENVIO = 9  # hora local del recordatorio diario
 
 async def enviar_recordatorios(bot, chat_id: int, hoy: date | None = None) -> bool:
     """
-    Calcula y envía los avisos del día. Devuelve True si mandó algo.
-    Nunca propaga: un fallo acá no puede tumbar el bot.
+    Calcula y envía los avisos del día. Nunca propaga: un fallo acá no puede
+    tumbar el bot.
+
+    Devuelve False solo si FALLÓ (la base o Telegram). "No había nada que
+    avisar" es True: el día quedó resuelto. La diferencia importa porque el
+    loop marca el día como hecho, y esa marca sobrevive a los reinicios: un
+    fallo transitorio a las 9 no puede dejar el día entero sin recordatorio.
     """
     import asyncio
 
     from bot.db import queries
     from bot.tools.alertas import alertar_error
 
-    hoy = hoy or date.today()
+    hoy = hoy or datetime.now(ZONA).date()
 
     try:
         facturas = await asyncio.to_thread(
@@ -187,7 +198,7 @@ async def enviar_recordatorios(bot, chat_id: int, hoy: date | None = None) -> bo
     mensaje = formatear_avisos(calcular_avisos(facturas, hoy))
     if mensaje is None:
         logger.info("Sin recordatorios para %s", hoy)
-        return False
+        return True
 
     try:
         await bot.send_message(chat_id=chat_id, text=mensaje, parse_mode="Markdown")
@@ -197,27 +208,46 @@ async def enviar_recordatorios(bot, chat_id: int, hoy: date | None = None) -> bo
         return False
 
 
+def toca_enviar(ahora: datetime, ultimo_envio: date | None) -> bool:
+    """True si ya pasó la hora del aviso y hoy todavía no salió."""
+    return ahora.hour >= HORA_ENVIO and ultimo_envio != ahora.date()
+
+
+def _ultimo_envio_guardado() -> date | None:
+    from bot.tools import estado
+
+    valor = estado.leer(estado.CLAVE_RECORDATORIO)
+    return _fecha(valor.get("fecha")) if isinstance(valor, dict) else None
+
+
 async def loop_recordatorios(bot, chat_id: int) -> None:
     """
-    Dispara los recordatorios una vez por día a HORA_ENVIO.
+    Dispara los recordatorios una vez por día a HORA_ENVIO (hora argentina).
 
     Se despierta cada media hora en vez de dormir hasta la hora exacta: así un
-    reinicio del bot no se saltea el aviso del día. La marca del último envío
-    evita duplicar si se reinicia varias veces.
+    reinicio del bot no se saltea el aviso del día. La marca del último envío se
+    guarda en la base, no en memoria: si no, cada reinicio después de las 9
+    volvía a mandar el aviso que ya había salido.
     """
     import asyncio
-    from datetime import datetime
 
-    ultimo_envio: date | None = None
-    logger.info("Loop de recordatorios iniciado (envío diario a las %d:00)", HORA_ENVIO)
+    from bot.tools import estado
+
+    ultimo_envio = await asyncio.to_thread(_ultimo_envio_guardado)
+    logger.info("Loop de recordatorios iniciado (envío diario a las %d:00, último: %s)",
+                HORA_ENVIO, ultimo_envio)
 
     while True:
         try:
-            ahora = datetime.now()
-            if ahora.hour >= HORA_ENVIO and ultimo_envio != ahora.date():
-                await enviar_recordatorios(bot, chat_id, ahora.date())
-                ultimo_envio = ahora.date()
+            ahora = datetime.now(ZONA)
+            if toca_enviar(ahora, ultimo_envio):
+                # Si falló, no se marca: se reintenta en media hora.
+                if await enviar_recordatorios(bot, chat_id, ahora.date()):
+                    ultimo_envio = ahora.date()
+                    await asyncio.to_thread(
+                        estado.guardar, estado.CLAVE_RECORDATORIO,
+                        {"fecha": ultimo_envio.isoformat()},
+                    )
         except Exception:
             logger.exception("Error en el loop de recordatorios")
-
         await asyncio.sleep(1800)

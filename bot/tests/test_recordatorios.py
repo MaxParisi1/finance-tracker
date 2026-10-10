@@ -6,13 +6,14 @@ y que avise de más (y dejes de leerlo, que termina siendo lo mismo). Los tests
 fijan la cadencia exacta para que ningún cambio futuro la corra sin querer.
 """
 
-from datetime import date
+from datetime import date, datetime
+from unittest.mock import patch
 
 import pytest
 
 from bot.tools.recordatorios import (
     TIPO_FALTA_COMPROBANTE, TIPO_FALTA_FACTURA, TIPO_VENCE, TIPO_VENCIDA,
-    calcular_avisos, formatear_avisos,
+    ZONA, _ultimo_envio_guardado, calcular_avisos, formatear_avisos, toca_enviar,
 )
 
 LUNES = date(2026, 8, 10)
@@ -204,3 +205,83 @@ def test_separa_vencimientos_de_documentacion_pendiente():
     msg = formatear_avisos(avisos)
     assert "*Vencimientos*" in msg
     assert "*Documentación pendiente*" in msg
+
+
+# ──────────────────────────────────────────────
+# Una vez por día, aunque el bot se reinicie
+# ──────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_no_reenvia_el_recordatorio_despues_de_un_reinicio():
+    """
+    Bug real: la marca de "hoy ya avisé" era una variable local del loop. Cada
+    deploy-bot después de las 9 arrancaba sin memoria y volvía a mandar el
+    recordatorio del día. Ahora la marca se lee de la base al arrancar.
+    """
+    with patch("bot.tools.estado.queries.leer_estado", return_value={"fecha": "2026-08-11"}):
+        ultimo = _ultimo_envio_guardado()
+
+    reinicio_a_las_15 = datetime(2026, 8, 11, 15, 0, tzinfo=ZONA)
+    assert ultimo == date(2026, 8, 11)
+    assert toca_enviar(reinicio_a_las_15, ultimo) is False
+
+
+@pytest.mark.unit
+def test_al_dia_siguiente_vuelve_a_avisar():
+    assert toca_enviar(datetime(2026, 8, 12, 9, 5, tzinfo=ZONA), date(2026, 8, 11)) is True
+
+
+@pytest.mark.unit
+def test_antes_de_las_nueve_no_avisa():
+    assert toca_enviar(datetime(2026, 8, 12, 8, 59, tzinfo=ZONA), date(2026, 8, 11)) is False
+
+
+@pytest.mark.unit
+def test_si_la_base_no_responde_el_loop_arranca_igual():
+    """Sin marca se comporta como antes (avisa); lo que no puede es tumbar el bot."""
+    with patch("bot.tools.estado.queries.leer_estado", side_effect=RuntimeError("sin red")):
+        assert _ultimo_envio_guardado() is None
+
+
+@pytest.mark.unit
+def test_las_nueve_son_las_de_argentina_no_las_del_servidor():
+    """A las 9:00 UTC en Buenos Aires son las 6: todavía no toca."""
+    from datetime import timezone
+    nueve_utc = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc).astimezone(ZONA)
+    assert toca_enviar(nueve_utc, None) is False
+
+
+@pytest.mark.unit
+def test_un_envio_fallido_no_cuenta_como_enviado():
+    """
+    Si Telegram falla a las 9, el día no puede quedar marcado como avisado: la
+    marca se guarda en la base, así que ni un reinicio lo reintentaría.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.tools.recordatorios import enviar_recordatorios
+
+    vence_hoy = [factura("2026-08-11")]
+    bot = MagicMock()
+    bot.send_message = AsyncMock(side_effect=RuntimeError("Telegram caído"))
+    with patch("bot.db.queries.obtener_facturas_con_archivos", return_value=vence_hoy):
+        assert asyncio.run(enviar_recordatorios(bot, 1, MARTES)) is False
+
+    bot.send_message = AsyncMock()
+    with patch("bot.db.queries.obtener_facturas_con_archivos", return_value=vence_hoy):
+        assert asyncio.run(enviar_recordatorios(bot, 1, MARTES)) is True
+
+
+@pytest.mark.unit
+def test_un_dia_sin_nada_que_avisar_queda_resuelto():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.tools.recordatorios import enviar_recordatorios
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    with patch("bot.db.queries.obtener_facturas_con_archivos", return_value=[]):
+        assert asyncio.run(enviar_recordatorios(bot, 1, MARTES)) is True
+    bot.send_message.assert_not_called()

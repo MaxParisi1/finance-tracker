@@ -592,6 +592,46 @@ def vincular_archivo_a_factura(archivo_id: str, factura_id: str) -> dict:
     return res.data[0] if res.data else {}
 
 
+def vincular_archivos_de_factura_a_gasto(factura_id: str, gasto_id: str) -> list[dict]:
+    """
+    Apunta al gasto todos los archivos de la factura que todavía no tienen uno.
+
+    El PDF de la factura se archiva antes de pagarla, cuando el gasto no existe:
+    sin este paso quedaba para siempre sin vincular. No pisa un vínculo previo.
+    """
+    client = get_client()
+    res = (
+        client.table("archivos_drive")
+        .update({"gasto_id": gasto_id})
+        .eq("factura_id", factura_id)
+        .is_("gasto_id", "null")
+        .execute()
+    )
+    return res.data
+
+
+def obtener_facturas_sin_pdf(servicio_id: str) -> list[dict]:
+    """
+    Facturas del servicio, en cualquier estado salvo anulada, que todavía no
+    tienen archivado su PDF. Son las únicas candidatas para una factura que
+    llega tarde y no se puede ubicar por vencimiento.
+    """
+    client = get_client()
+    res = (
+        client.table("facturas")
+        .select("*, archivos_drive(tipo)")
+        .eq("servicio_id", servicio_id)
+        .neq("estado", "anulada")
+        .order("vencimiento")
+        .execute()
+    )
+    return [
+        {k: v for k, v in f.items() if k != "archivos_drive"}
+        for f in res.data
+        if not any(a.get("tipo") == "factura" for a in f.get("archivos_drive") or [])
+    ]
+
+
 def obtener_ultima_factura(servicio_id: str) -> dict | None:
     """
     Última factura del servicio por vencimiento, en cualquier estado.

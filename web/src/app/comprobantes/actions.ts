@@ -4,6 +4,25 @@ import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
 import { subirArchivoDrive } from '@/lib/drive'
 
+/**
+ * Factura que ese gasto saldó, si es el pago de un servicio fijo.
+ *
+ * Registro arma la grilla por `factura_id`, no por `gasto_id`: un archivo
+ * vinculado a mano solo al gasto seguía figurando ahí como faltante.
+ */
+async function facturaDelGasto(
+  supabase: ReturnType<typeof getSupabaseServer>,
+  gastoId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('facturas')
+    .select('id')
+    .eq('gasto_id', gastoId)
+    .neq('estado', 'anulada')
+    .limit(1)
+  return data?.[0]?.id ?? null
+}
+
 export async function subirYVincularArchivoAction(formData: FormData) {
   const file = formData.get('file') as File | null
   const gastoId = formData.get('gastoId') as string
@@ -33,6 +52,7 @@ export async function subirYVincularArchivoAction(formData: FormData) {
   const supabase = getSupabaseServer()
   const { error } = await supabase.from('archivos_drive').insert({
     gasto_id: gastoId,
+    factura_id: await facturaDelGasto(supabase, gastoId),
     tipo,
     comercio: comercio.trim() || null,
     fecha,
@@ -50,6 +70,7 @@ export async function subirYVincularArchivoAction(formData: FormData) {
 
   revalidatePath('/gastos')
   revalidatePath('/comprobantes')
+  revalidatePath('/registro')
   revalidatePath('/dashboard')
 }
 
@@ -60,6 +81,18 @@ export async function vincularArchivoExistenteAction(archivoId: string, gastoId:
     .update({ gasto_id: gastoId })
     .eq('id', archivoId)
   if (error) throw new Error(error.message)
+
+  // Solo si no tenía factura: una que ya esté colgada no se repunta.
+  const facturaId = await facturaDelGasto(supabase, gastoId)
+  if (facturaId) {
+    const { error: errFactura } = await supabase
+      .from('archivos_drive')
+      .update({ factura_id: facturaId })
+      .eq('id', archivoId)
+      .is('factura_id', null)
+    if (errFactura) throw new Error(errFactura.message)
+  }
   revalidatePath('/gastos')
   revalidatePath('/comprobantes')
+  revalidatePath('/registro')
 }

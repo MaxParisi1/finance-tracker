@@ -325,7 +325,8 @@ def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict) -> dict:
         "drive_folder_path": subido["folder_path"],
         "mime_type": "application/pdf",
         "factura_id": factura["id"],
-        "gasto_id": None,
+        # Un reintento puede llegar con la factura ya paga: hereda su gasto.
+        "gasto_id": factura.get("gasto_id"),
     })
 
 

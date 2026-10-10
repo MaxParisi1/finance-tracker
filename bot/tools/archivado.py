@@ -94,6 +94,21 @@ def _registrar_pago(servicio: dict, factura: dict, fecha: date) -> dict:
     return gasto
 
 
+# Una factura se emite, a lo sumo, este tiempo antes de vencer.
+_MAX_DIAS_EMISION_A_VTO = 45
+
+
+def _vence_poco_despues(factura: dict, fecha: date | None) -> bool:
+    """True si `fecha` puede ser la emisión de esa factura. Sin fecha no descarta."""
+    if fecha is None:
+        return True
+    try:
+        vencimiento = date.fromisoformat(str(factura.get("vencimiento")))
+    except ValueError:
+        return False
+    return 0 <= (vencimiento - fecha).days <= _MAX_DIAS_EMISION_A_VTO
+
+
 def _seleccionar_factura(servicio: dict, doc: DocumentoIdentificado) -> SeleccionFactura:
     """
     Elige a qué factura corresponde el documento, según lo que el documento ES.
@@ -107,7 +122,14 @@ def _seleccionar_factura(servicio: dict, doc: DocumentoIdentificado) -> Seleccio
     vecinos entran dentro de la tolerancia del 5% y no alcanzan para desempatar.
 
     Si el PDF no expone el vencimiento de forma legible (Edenor y MetroGAS lo
-    escriben pegado al texto), se cae al camino de siempre.
+    escriben pegado al texto) la fecha leída es otra — en MetroGAS sale la de
+    emisión — y la búsqueda por vencimiento no encuentra nada. Ahí se busca entre
+    las facturas que todavía no tienen su PDF la que tenga EXACTAMENTE ese
+    importe: el aviso y el PDF dicen el mismo total, así que la igualdad sí
+    desempata donde la tolerancia no podía. La fecha leída tiene que caer poco
+    antes del vencimiento de la candidata: en un servicio de importe fijo, sin
+    eso el PDF de este mes se colgaría de la factura del mes pasado. Si no hay
+    una sola, no se adivina y se cae al camino de siempre.
     """
     if doc.tipo == TIPO_FACTURA and doc.fecha is not None:
         exacta = queries.obtener_factura_por_vencimiento(
@@ -118,6 +140,17 @@ def _seleccionar_factura(servicio: dict, doc: DocumentoIdentificado) -> Seleccio
             tolerancia = max(abs(esperado) * TOLERANCIA_RELATIVA, TOLERANCIA_MINIMA)
             coincide = doc.monto is not None and abs(doc.monto - esperado) <= tolerancia
             return SeleccionFactura(exacta, "coincide por vencimiento", coincide)
+
+    if doc.tipo == TIPO_FACTURA and doc.monto is not None:
+        mismo_importe = [
+            f for f in queries.obtener_facturas_sin_pdf(servicio["id"])
+            if abs(doc.monto - float(f["monto"])) <= TOLERANCIA_MINIMA
+            and _vence_poco_despues(f, doc.fecha)
+        ]
+        if len(mismo_importe) == 1:
+            return SeleccionFactura(
+                mismo_importe[0], "coincide por importe con una factura sin PDF", True
+            )
 
     pendientes = queries.obtener_facturas_pendientes(servicio["id"])
     return elegir_factura(pendientes, doc.monto, doc.fecha)
@@ -166,6 +199,12 @@ def archivar_documento(
         )
         if not saldada:
             avisos.append("la factura ya figuraba saldada")
+        else:
+            # El PDF de la factura se archivó antes de que existiera este gasto.
+            queries.vincular_archivos_de_factura_a_gasto(factura["id"], gasto["id"])
+
+    # Lo que cuelga de una factura ya paga apunta al mismo gasto que la saldó.
+    gasto_id = gasto["id"] if gasto else (factura or {}).get("gasto_id")
 
     archivo = queries.insertar_archivo_drive({
         "tipo": doc.tipo,
@@ -180,13 +219,13 @@ def archivar_documento(
         "drive_folder_path": subido["folder_path"],
         "mime_type": mime_type,
         "factura_id": factura["id"] if factura else None,
-        "gasto_id": gasto["id"] if gasto else None,
+        "gasto_id": gasto_id,
     })
 
     logger.info(
         "Documento archivado: %s/%s → factura=%s gasto=%s",
         servicio["slug"], doc.tipo,
-        factura["id"] if factura else None, gasto["id"] if gasto else None,
+        factura["id"] if factura else None, gasto_id,
     )
 
     return ResultadoArchivado(

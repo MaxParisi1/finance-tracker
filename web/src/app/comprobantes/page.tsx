@@ -1,8 +1,10 @@
 import Sidebar from '@/components/Sidebar'
+import SeccionTabs from '@/components/SeccionTabs'
 import ComprobantesView from '@/components/ComprobantesView'
 import GastosFilter from '@/components/GastosFilter'
 import { getArchivosDrive, getCategorias, getGastosMes } from '@/lib/queries'
 import { monthLabel } from '@/lib/utils'
+import { ahoraAR } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +13,7 @@ export default async function ComprobantesPage({
 }: {
   searchParams: { mes?: string; anio?: string }
 }) {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const mes = searchParams.mes ? parseInt(searchParams.mes) : hoy.getMonth() + 1
   const anio = searchParams.anio ? parseInt(searchParams.anio) : hoy.getFullYear()
 
@@ -27,6 +29,7 @@ export default async function ComprobantesPage({
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
+          <SeccionTabs />
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
             <div>

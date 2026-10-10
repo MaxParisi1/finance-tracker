@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
 import { subirArchivoDrive } from '@/lib/drive'
+import { exigirSesion } from '@/lib/auth'
 
 /**
  * Factura que ese gasto saldó, si es el pago de un servicio fijo.
@@ -24,6 +25,7 @@ async function facturaDelGasto(
 }
 
 export async function subirYVincularArchivoAction(formData: FormData) {
+  exigirSesion()
   const file = formData.get('file') as File | null
   const gastoId = formData.get('gastoId') as string
   const comercio = (formData.get('comercio') as string) || 'Sin comercio'
@@ -75,6 +77,7 @@ export async function subirYVincularArchivoAction(formData: FormData) {
 }
 
 export async function vincularArchivoExistenteAction(archivoId: string, gastoId: string) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const { error } = await supabase
     .from('archivos_drive')

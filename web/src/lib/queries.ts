@@ -1,6 +1,7 @@
 import { getSupabaseServer } from './supabase'
 import type { Gasto, GastoRecurrente, Categoria, MensualResumen, TendenciaMes, ArchivoDrive, PlanCuota } from './types'
 import { monthLabel } from './utils'
+import { ahoraAR, hoyISO } from '@/lib/fechas'
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -15,6 +16,28 @@ function monthRange(mes: number, anio: number): { desde: string; hasta: string }
   return { desde, hasta }
 }
 
+/**
+ * Trae TODAS las filas de una consulta, de a páginas.
+ *
+ * Supabase devuelve como mucho 1000 filas por pedido y no avisa cuando corta:
+ * el Histórico a 12 meses sumaba solo las 1000 más nuevas y mostraba totales de
+ * menos sin ningún error. La consulta tiene que tener un orden estable (por eso
+ * las que usan esto desempatan por id), o las páginas se pisan entre sí.
+ */
+const PAGINA = 1000
+
+async function traerTodo<T>(
+  consulta: (desde: number, hasta: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const filas: T[] = []
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await consulta(desde, desde + PAGINA - 1)
+    if (error) throw error
+    filas.push(...(data ?? []))
+    if (!data || data.length < PAGINA) return filas
+  }
+}
+
 // ──────────────────────────────────────────────
 // Gastos
 // ──────────────────────────────────────────────
@@ -23,16 +46,17 @@ export async function getGastosMes(mes: number, anio: number): Promise<Gasto[]> 
   const supabase = getSupabaseServer()
   const { desde, hasta } = monthRange(mes, anio)
 
-  const { data, error } = await supabase
-    .from('gastos')
-    .select('*')
-    .is('deleted_at', null)
-    .gte('fecha', desde)
-    .lt('fecha', hasta)
-    .order('fecha', { ascending: false })
-
-  if (error) throw error
-  return data ?? []
+  return traerTodo<Gasto>((a, b) =>
+    supabase
+      .from('gastos')
+      .select('*')
+      .is('deleted_at', null)
+      .gte('fecha', desde)
+      .lt('fecha', hasta)
+      .order('fecha', { ascending: false })
+      .order('id')
+      .range(a, b),
+  )
 }
 
 export async function getGastosRecientes(limit = 10): Promise<Gasto[]> {
@@ -67,14 +91,17 @@ export async function searchGastos(q: string): Promise<Gasto[]> {
 
 export async function getAllComercios(): Promise<string[]> {
   const supabase = getSupabaseServer()
-  const { data, error } = await supabase
-    .from('gastos')
-    .select('comercio')
-    .is('deleted_at', null)
-    .not('comercio', 'is', null)
-    .order('comercio')
-  if (error) throw error
-  const unique = Array.from(new Set((data ?? []).map(r => r.comercio as string).filter(Boolean)))
+  const data = await traerTodo<{ comercio: string | null }>((a, b) =>
+    supabase
+      .from('gastos')
+      .select('comercio')
+      .is('deleted_at', null)
+      .not('comercio', 'is', null)
+      .order('comercio')
+      .order('id')
+      .range(a, b),
+  )
+  const unique = Array.from(new Set(data.map(r => r.comercio as string).filter(Boolean)))
   return unique.sort()
 }
 
@@ -139,7 +166,7 @@ export async function getResumenMes(
 }
 
 export async function getTendencia(meses = 6): Promise<TendenciaMes[]> {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const periodos: { mes: number; anio: number }[] = []
 
   for (let i = meses - 1; i >= 0; i--) {
@@ -149,10 +176,37 @@ export async function getTendencia(meses = 6): Promise<TendenciaMes[]> {
     periodos.push({ mes, anio })
   }
 
-  const resúmenes = await Promise.all(periodos.map(p => getResumenMes(p.mes, p.anio)))
+  // Una sola consulta con las dos columnas que hacen falta, en vez de bajar
+  // todos los gastos de cada mes por separado (a 12 meses eran 12 pedidos).
+  const primero = periodos[0]
+  const ultimo = periodos[periodos.length - 1]
+  const supabase = getSupabaseServer()
+  const filas = await traerTodo<{ fecha: string; monto_ars: number | null }>((a, b) =>
+    supabase
+      .from('gastos')
+      .select('fecha, monto_ars')
+      .is('deleted_at', null)
+      .gte('fecha', monthRange(primero.mes, primero.anio).desde)
+      .lt('fecha', monthRange(ultimo.mes, ultimo.anio).hasta)
+      .order('fecha')
+      .order('id')
+      .range(a, b),
+  )
 
-  return resúmenes.map((r, i) => {
-    const prev = i > 0 ? resúmenes[i - 1].total_ars : null
+  const porMes = new Map<string, { total: number; cantidad: number }>()
+  for (const f of filas) {
+    const key = f.fecha.slice(0, 7)
+    const prev = porMes.get(key) ?? { total: 0, cantidad: 0 }
+    porMes.set(key, { total: prev.total + (f.monto_ars ?? 0), cantidad: prev.cantidad + 1 })
+  }
+
+  const totales = periodos.map(p => {
+    const m = porMes.get(`${p.anio}-${String(p.mes).padStart(2, '0')}`)
+    return { ...p, total_ars: Math.round(m?.total ?? 0), cantidad: m?.cantidad ?? 0 }
+  })
+
+  return totales.map((r, i) => {
+    const prev = i > 0 ? totales[i - 1].total_ars : null
     const variacion_pct =
       prev !== null && prev > 0 ? Math.round(((r.total_ars - prev) / prev) * 1000) / 10 : null
 
@@ -216,7 +270,7 @@ export interface TipoCambioInfo {
 
 export async function getTipoCambioActual(tipo = 'oficial'): Promise<TipoCambioInfo | null> {
   const supabase = getSupabaseServer()
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = hoyISO()
 
   // Always fetch from Bluelytics; Next.js Data Cache revalida cada hora
   try {
@@ -261,7 +315,7 @@ export async function getDailySpending(
   anio: number,
 ): Promise<{ dia: number; total_ars: number; acumulado: number }[]> {
   const gastos = await getGastosMes(mes, anio)
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const diasHastaHoy =
     hoy.getFullYear() === anio && hoy.getMonth() + 1 === mes
       ? hoy.getDate()
@@ -311,43 +365,6 @@ export async function getPaymentMethodBreakdown(
 }
 
 // ──────────────────────────────────────────────
-// Recurrentes con costo mensual calculado
-// ──────────────────────────────────────────────
-
-// ──────────────────────────────────────────────
-// Presupuestos
-// ──────────────────────────────────────────────
-
-export async function getPresupuestos(mes: number, anio: number) {
-  const supabase = getSupabaseServer()
-  const { data, error } = await supabase
-    .from('presupuestos')
-    .select('*')
-    .eq('mes', mes)
-    .eq('anio', anio)
-
-  if (error) throw error
-  return (data ?? []) as { id: string; categoria: string; mes: number; anio: number; monto_limite: number }[]
-}
-
-export async function getPresupuestosConGasto(mes: number, anio: number) {
-  const [presupuestos, resumen] = await Promise.all([
-    getPresupuestos(mes, anio),
-    getResumenMes(mes, anio),
-  ])
-
-  const gastoMap = Object.fromEntries(
-    resumen.por_categoria.map(c => [c.categoria, c.total_ars]),
-  )
-
-  return presupuestos.map(p => ({
-    ...p,
-    gastado: gastoMap[p.categoria] ?? 0,
-    pct: p.monto_limite > 0 ? Math.round(((gastoMap[p.categoria] ?? 0) / p.monto_limite) * 100) : 0,
-  }))
-}
-
-// ──────────────────────────────────────────────
 // Cuotas activas
 // ──────────────────────────────────────────────
 
@@ -366,7 +383,7 @@ export interface CuotaActiva {
 
 export async function getCuotasActivas(): Promise<CuotaActiva[]> {
   const supabase = getSupabaseServer()
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = hoyISO()
 
   const { data, error } = await supabase
     .from('gastos')
@@ -420,7 +437,7 @@ export async function getRecurrentesConCosto(): Promise<{
   recurrentes: RecurrenteConCosto[]
   total_mensual_ars: number
   total_anual_ars: number
-  tc_blue: number | null
+  tc_oficial: number | null
   tc_fecha: string | null
   tc_es_hoy: boolean
 }> {
@@ -430,7 +447,7 @@ export async function getRecurrentesConCosto(): Promise<{
     getRecurrentes(),
     getTipoCambioActual('oficial'),
   ])
-  const tc_blue = tcInfo?.valor ?? null
+  const tc_oficial = tcInfo?.valor ?? null
 
   // Para recurrentes con no_materializar, traer el último gasto vinculado real
   const noMaterializarIds = recurrentes.filter(r => r.no_materializar).map(r => r.id)
@@ -454,13 +471,13 @@ export async function getRecurrentesConCosto(): Promise<{
     }
   }
 
-  const hoy = new Date()
+  const hoy = ahoraAR()
 
   const recurrentesConCosto: RecurrenteConCosto[] = recurrentes.map(r => {
     const ultimoGasto = r.no_materializar ? ultimoMontoMap.get(r.id) : undefined
     const monto = ultimoGasto?.monto_original ?? r.monto_original
     const moneda = ultimoGasto?.moneda ?? r.moneda
-    const tc = tc_blue ?? 1
+    const tc = tc_oficial ?? 1
     const montoARS = moneda === 'USD' ? monto * tc : monto
 
     let mensual_ars: number
@@ -488,7 +505,7 @@ export async function getRecurrentesConCosto(): Promise<{
     recurrentes: recurrentesConCosto,
     total_mensual_ars,
     total_anual_ars: total_mensual_ars * 12,
-    tc_blue,
+    tc_oficial,
     tc_fecha: tcInfo?.fecha ?? null,
     tc_es_hoy: tcInfo?.esHoy ?? false,
   }
@@ -647,7 +664,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
     facturaPorRec.set(recId, { monto: Number(f.monto), vencimiento: f.vencimiento })
   }
 
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+  const hoy = ahoraAR(); hoy.setHours(0, 0, 0, 0)
   const diasHasta = (fecha: string) => Math.round((new Date(fecha + 'T00:00:00').getTime() - hoy.getTime()) / DAY)
 
   // Pago que salda la ocurrencia de este mes (o undefined).
@@ -779,7 +796,7 @@ export interface Obligacion {
 
 /** Obligaciones de este mes y el próximo (fijos + cuotas), ordenadas por fecha. */
 export async function getAgenda(): Promise<Obligacion[]> {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const mes = hoy.getMonth() + 1
   const anio = hoy.getFullYear()
   const nMes = mes === 12 ? 1 : mes + 1
@@ -967,23 +984,23 @@ export async function getGastosHistorico(filtros: {
 }): Promise<{ meses: HistoricoMes[]; gastos: Gasto[] }> {
   const supabase = getSupabaseServer()
 
-  let q = supabase
-    .from('gastos')
-    .select('*')
-    .is('deleted_at', null)
-    .gte('fecha', filtros.desde)
-    .lt('fecha', filtros.hasta)
-    .order('fecha', { ascending: false })
+  const gastos = await traerTodo<Gasto>((a, b) => {
+    let q = supabase
+      .from('gastos')
+      .select('*')
+      .is('deleted_at', null)
+      .gte('fecha', filtros.desde)
+      .lt('fecha', filtros.hasta)
+      .order('fecha', { ascending: false })
+      .order('id')
 
-  if (filtros.busqueda) {
-    q = q.or(`descripcion.ilike.%${filtros.busqueda}%,comercio.ilike.%${filtros.busqueda}%`)
-  }
-  if (filtros.categoria) q = q.eq('categoria', filtros.categoria)
-  if (filtros.medio_pago) q = q.eq('medio_pago', filtros.medio_pago)
-
-  const { data, error } = await q
-  if (error) throw error
-  const gastos: Gasto[] = data ?? []
+    if (filtros.busqueda) {
+      q = q.or(`descripcion.ilike.%${filtros.busqueda}%,comercio.ilike.%${filtros.busqueda}%`)
+    }
+    if (filtros.categoria) q = q.eq('categoria', filtros.categoria)
+    if (filtros.medio_pago) q = q.eq('medio_pago', filtros.medio_pago)
+    return q.range(a, b)
+  })
 
   const mesMap = new Map<string, HistoricoMes>()
   for (const g of gastos) {
@@ -1079,7 +1096,7 @@ export async function getRegistro(anio: number): Promise<Registro> {
   ])
 
   const meses = Array.from({ length: 12 }, (_, i) => `${anio}-${pad2(i + 1)}`)
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const mesActual = `${hoy.getFullYear()}-${pad2(hoy.getMonth() + 1)}`
 
   const filas: FilaRegistro[] = (servicios ?? []).map(s => {
@@ -1148,4 +1165,144 @@ export async function getRegistro(anio: number): Promise<Registro> {
     celdas_completas,
     pct_completo: total_celdas ? Math.round((celdas_completas / total_celdas) * 100) : 0,
   }
+}
+
+// ──────────────────────────────────────────────
+// Bandeja "Requiere tu atención"
+// ──────────────────────────────────────────────
+
+export interface Pendiente {
+  tono: 'urgente' | 'aviso'
+  titulo: string
+  detalle: string
+  href?: string
+}
+
+// El bot corre cada 15 minutos; si pasó este tiempo sin reportar, está caído.
+const MINUTOS_BOT_CAIDO = 45
+
+/**
+ * Todo lo que necesita una decisión o una acción tuya, en un solo lugar.
+ *
+ * Son las mismas cosas que el bot avisa por Telegram, pero un mensaje se pierde
+ * chat arriba y esto queda a la vista hasta que se resuelve. Cada fuente se
+ * consulta por separado y si una falla no arrastra a las demás: una bandeja a
+ * medias sirve, un Panel caído no.
+ */
+export async function getPendientes(): Promise<Pendiente[]> {
+  const supabase = getSupabaseServer()
+  const hoy = hoyISO()
+  const ahora = ahoraAR()
+  const desde = new Date(ahora.getFullYear(), ahora.getMonth() - 3, 1)
+  const desdeStr = `${desde.getFullYear()}-${pad2(desde.getMonth() + 1)}-01`
+
+  const [estado, tarjetas, facturas, sueltos] = await Promise.all([
+    supabase.from('bot_estado').select('clave, valor, updated_at').like('clave', 'poller:%'),
+    supabase.from('tarjetas').select('sufijo, nombre').eq('pendiente_clasificacion', true),
+    supabase
+      .from('facturas')
+      .select('id, monto, vencimiento, estado, servicios(nombre), archivos_drive(tipo)')
+      .neq('estado', 'anulada')
+      .gte('vencimiento', desdeStr),
+    supabase
+      .from('archivos_drive')
+      .select('id', { count: 'exact', head: true })
+      // El PDF de una factura todavía impaga tiene factura pero no gasto, y
+      // está bien así: suelto es el que no cuelga de ninguna de las dos.
+      .is('gasto_id', null)
+      .is('factura_id', null)
+      .gte('fecha', desdeStr),
+  ])
+
+  const urgentes: Pendiente[] = []
+  const avisos: Pendiente[] = []
+
+  // ── El bot: si corre, y qué mails dejó sin procesar ──
+  for (const fila of estado.data ?? []) {
+    const etiqueta = String(fila.clave).replace('poller:', '')
+    const valor = (fila.valor ?? {}) as { ok?: boolean; atascados?: { asunto?: string; motivo?: string }[] }
+    const minutos = Math.round((Date.now() - new Date(fila.updated_at).getTime()) / 60000)
+
+    if (minutos > MINUTOS_BOT_CAIDO) {
+      const hace = minutos >= 120 ? `${Math.round(minutos / 60)} horas` : `${minutos} minutos`
+      urgentes.push({
+        tono: 'urgente',
+        titulo: `El bot no revisa "${etiqueta}" hace ${hace}`,
+        detalle: 'Puede estar caído. Mientras tanto no se registran gastos ni facturas de esa etiqueta.',
+      })
+      continue
+    }
+    if (valor.ok === false) {
+      urgentes.push({
+        tono: 'urgente',
+        titulo: `El bot no puede leer "${etiqueta}" en Gmail`,
+        detalle: 'Falló la consulta en el último ciclo. Si sigue, revisá el token de Gmail.',
+      })
+    }
+    for (const mail of valor.atascados ?? []) {
+      avisos.push({
+        tono: 'aviso',
+        titulo: `Mail sin procesar: ${mail.asunto ?? '(sin asunto)'}`,
+        detalle: `${mail.motivo ?? 'No se pudo procesar'}. Quedó sin leer en "${etiqueta}" y se reintenta solo.`,
+      })
+    }
+  }
+
+  // ── Facturas: vencidas, y documentación que falta ──
+  for (const f of facturas.data ?? []) {
+    const servicio = (f.servicios as unknown as { nombre?: string } | null)?.nombre ?? 'Servicio'
+    const tipos = new Set(((f.archivos_drive ?? []) as { tipo: string }[]).map(a => a.tipo))
+    const mesVto = `${String(f.vencimiento).slice(5, 7)}/${String(f.vencimiento).slice(0, 4)}`
+
+    if (f.estado === 'pendiente' && String(f.vencimiento) < hoy) {
+      urgentes.push({
+        tono: 'urgente',
+        titulo: `${servicio} venció y figura sin pagar`,
+        detalle: `${formatARSLocal(Number(f.monto))} · venció el ${String(f.vencimiento).split('-').reverse().join('/')}. Si ya la pagaste, mandá el comprobante.`,
+        href: '/recurrentes',
+      })
+    }
+    if (f.estado === 'pagada' && !tipos.has('comprobante')) {
+      avisos.push({
+        tono: 'aviso',
+        titulo: `Falta el comprobante de ${servicio} ${mesVto}`,
+        detalle: 'Está paga pero sin el comprobante archivado.',
+        href: '/registro',
+      })
+    }
+    if (!tipos.has('factura')) {
+      avisos.push({
+        tono: 'aviso',
+        titulo: `Falta la factura de ${servicio} ${mesVto}`,
+        detalle: 'No hay PDF de la factura archivado. Mandalo por Telegram.',
+        href: '/registro',
+      })
+    }
+  }
+
+  // ── Tarjetas que el bot vio por primera vez y no sabe si son crédito o débito ──
+  for (const t of tarjetas.data ?? []) {
+    avisos.push({
+      tono: 'aviso',
+      titulo: `Tarjeta terminada en ${t.sufijo} sin clasificar`,
+      detalle: 'Sus consumos se están registrando como crédito. Si es débito, corregila en la tabla tarjetas.',
+    })
+  }
+
+  // ── Archivos que no quedaron colgados de ningún gasto ──
+  if ((sueltos.count ?? 0) > 0) {
+    const n = sueltos.count as number
+    avisos.push({
+      tono: 'aviso',
+      titulo: n === 1 ? '1 archivo sin vincular a un gasto' : `${n} archivos sin vincular a un gasto`,
+      detalle: 'Están en Drive pero no aparecen como respaldo de ningún pago.',
+      href: '/comprobantes',
+    })
+  }
+
+  return [...urgentes, ...avisos]
+}
+
+function formatARSLocal(monto: number): string {
+  return `$${Math.round(monto).toLocaleString('es-AR')}`
 }

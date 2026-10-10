@@ -1,11 +1,13 @@
 import Sidebar from '@/components/Sidebar'
+import SeccionTabs from '@/components/SeccionTabs'
 import AgendaView from '@/components/AgendaView'
 import { getAgenda, getRecurrentesConCosto, getFijosDelMes } from '@/lib/queries'
+import { ahoraAR } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AgendaPage() {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const [obligaciones, { recurrentes }, fijos] = await Promise.all([
     getAgenda(),
     getRecurrentesConCosto(),
@@ -18,6 +20,7 @@ export default async function AgendaPage() {
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
+          <SeccionTabs />
           <div className="mb-6">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Lo que viene</h1>
             <p className="text-muted-foreground text-sm mt-1">

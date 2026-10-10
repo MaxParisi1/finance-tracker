@@ -3,36 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-import {
-  LayoutDashboard,
-  RefreshCw,
-  FileText,
-  CreditCard,
-  BarChart3,
-  Layers,
-  History,
-  Plus,
-  MoreHorizontal,
-  CalendarClock,
-  X,
-  ClipboardCheck,
-} from 'lucide-react'
+import { Plus, MoreHorizontal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { SECCIONES } from '@/lib/nav'
+import { EVENTO_NUEVO_GASTO } from '@/components/NuevoGastoModal'
 
-const PRIMARY = [
-  { href: '/dashboard',    label: 'Panel',        icon: LayoutDashboard },
-  { href: '/agenda',       label: 'Agenda',       icon: CalendarClock },
-  { href: '/recurrentes',  label: 'Fijos',        icon: RefreshCw },
-]
-
-const MORE = [
-  { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
-  { href: '/registro',     label: 'Registro',     icon: ClipboardCheck },
-  { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
-  { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
-  { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
-  { href: '/historico',    label: 'Histórico',    icon: History },
-]
+// En el celular entran cuatro lugares más el "+": lo de todos los días queda a
+// mano y el resto va en "Más".
+const PRIMARY = SECCIONES.filter(s => ['Panel', 'Pagos', 'Gastos'].includes(s.label))
+const MORE = SECCIONES.filter(s => !PRIMARY.includes(s))
 
 export default function BottomNav() {
   const pathname = usePathname()
@@ -40,7 +19,8 @@ export default function BottomNav() {
 
   if (pathname === '/login') return null
 
-  const moreActive = MORE.some(i => pathname.startsWith(i.href))
+  const activa = (s: (typeof SECCIONES)[number]) => s.tabs.some(t => pathname.startsWith(t.href))
+  const moreActive = MORE.some(activa)
 
   return (
     <>
@@ -62,11 +42,11 @@ export default function BottomNav() {
             <div className="grid grid-cols-2 gap-1.5">
               {MORE.map(item => {
                 const Icon = item.icon
-                const active = pathname.startsWith(item.href)
+                const active = activa(item)
                 return (
                   <Link
-                    key={item.href}
-                    href={item.href}
+                    key={item.label}
+                    href={item.tabs[0].href}
                     onClick={() => setMoreOpen(false)}
                     className={cn(
                       'flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-colors',
@@ -88,13 +68,13 @@ export default function BottomNav() {
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div className="glass-nav border-x-0 border-b-0 flex items-stretch px-1">
-          {PRIMARY.map(item => {
+          {PRIMARY.slice(0, 2).map(item => {
             const Icon = item.icon
-            const active = pathname.startsWith(item.href)
+            const active = activa(item)
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={item.label}
+                href={item.tabs[0].href}
                 className="flex-1 flex flex-col items-center pt-2.5 pb-2 gap-1"
               >
                 <Icon
@@ -102,7 +82,7 @@ export default function BottomNav() {
                   strokeWidth={active ? 2.2 : 1.8}
                 />
                 <span className={cn('text-[10px] leading-none font-medium', active ? 'text-primary' : 'text-muted-foreground')}>
-                  {item.label}
+                  {item.corto}
                 </span>
               </Link>
             )
@@ -111,13 +91,34 @@ export default function BottomNav() {
           {/* FAB — registrar gasto */}
           <div className="flex-1 flex justify-center">
             <button
-              onClick={() => window.dispatchEvent(new Event('open-chat'))}
+              onClick={() => window.dispatchEvent(new Event(EVENTO_NUEVO_GASTO))}
               aria-label="Registrar gasto"
               className="-mt-5 w-12 h-12 rounded-full bg-primary text-primary-foreground grid place-items-center shadow-card-hover active:scale-95 transition-transform"
             >
               <Plus className="w-6 h-6" strokeWidth={2.4} />
             </button>
           </div>
+
+          {PRIMARY.slice(2).map(item => {
+            const Icon = item.icon
+            const active = activa(item)
+            return (
+              <Link
+                key={item.label}
+                href={item.tabs[0].href}
+                className="flex-1 flex flex-col items-center pt-2.5 pb-2 gap-1"
+              >
+                <Icon
+                  className={cn('w-5 h-5 transition-colors', active ? 'text-primary' : 'text-muted-foreground')}
+                  strokeWidth={active ? 2.2 : 1.8}
+                />
+                <span className={cn('text-[10px] leading-none font-medium', active ? 'text-primary' : 'text-muted-foreground')}>
+                  {item.corto}
+                </span>
+              </Link>
+            )
+          })}
+
 
           <button
             onClick={() => setMoreOpen(o => !o)}

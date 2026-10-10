@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, Fraunces } from 'next/font/google'
 import './globals.css'
 import BottomNav from '@/components/BottomNav'
+import NuevoGastoModal from '@/components/NuevoGastoModal'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { Toaster } from 'sonner'
 
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
           <BottomNav />
+          <NuevoGastoModal />
           <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>

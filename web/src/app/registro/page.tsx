@@ -1,6 +1,8 @@
 import Sidebar from '@/components/Sidebar'
+import SeccionTabs from '@/components/SeccionTabs'
 import RegistroView from '@/components/RegistroView'
 import { getRegistro, getFijosDelMes } from '@/lib/queries'
+import { ahoraAR } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +11,7 @@ export default async function RegistroPage({
 }: {
   searchParams: { anio?: string }
 }) {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const anioParam = Number(searchParams.anio)
   const anio = anioParam >= 2020 && anioParam <= 2100 ? anioParam : hoy.getFullYear()
 
@@ -24,6 +26,7 @@ export default async function RegistroPage({
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
+          <SeccionTabs />
           <div className="mb-6 flex items-end justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">Registro</h1>

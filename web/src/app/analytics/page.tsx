@@ -1,4 +1,5 @@
 import Sidebar from '@/components/Sidebar'
+import SeccionTabs from '@/components/SeccionTabs'
 import SpendingTrendChart from '@/components/charts/SpendingTrendChart'
 import CategoryChart from '@/components/charts/CategoryChart'
 import TopMerchantsChart from '@/components/charts/TopMerchantsChart'
@@ -11,11 +12,12 @@ import {
 } from '@/lib/queries'
 import { formatARS, monthLabel, MEDIO_PAGO_LABELS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { ahoraAR } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: { meses?: string } }) {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const mes = hoy.getMonth() + 1
   const anio = hoy.getFullYear()
   const mesAnioAnterior = anio - 1
@@ -32,7 +34,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
       getPaymentMethodBreakdown(mes, anio),
       getTipoCambioActual('oficial'),
     ])
-  const tcBlue = tcInfo?.valor ?? null
+  const tcOficial = tcInfo?.valor ?? null
 
   const yoyVariacion =
     resumenYoY.total_ars > 0
@@ -44,8 +46,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
       ? Math.round(tendencia.reduce((sum, t) => sum + t.total_ars, 0) / tendencia.length)
       : 0
 
-  const equivalenteUSD = tcBlue && resumen.total_ars > 0
-    ? Math.round(resumen.total_ars / tcBlue)
+  const equivalenteUSD = tcOficial && resumen.total_ars > 0
+    ? Math.round(resumen.total_ars / tcOficial)
     : null
 
   return (
@@ -54,6 +56,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-5xl mx-auto">
+          <SeccionTabs />
           <div className="mb-8 flex items-end justify-between gap-3 flex-wrap">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">Analíticas</h1>
@@ -91,7 +94,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
                   <p className="text-lg font-bold text-foreground mt-1 tabular">
                     USD {equivalenteUSD.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-xs text-muted-foreground">TC ${tcBlue?.toLocaleString('es-AR')}</p>
+                  <p className="text-xs text-muted-foreground">TC ${tcOficial?.toLocaleString('es-AR')}</p>
                 </CardContent>
               </Card>
             )}
@@ -213,7 +216,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Mes', 'Total ARS', tcBlue ? 'USD equiv.' : null, 'Gastos', 'Prom./día', 'vs anterior']
+                    {['Mes', 'Total ARS', tcOficial ? 'USD equiv.' : null, 'Gastos', 'Prom./día', 'vs anterior']
                       .filter(Boolean).map((h, i) => (
                       <th key={h} className={cn(
                         'pb-3 text-xs font-medium text-muted-foreground uppercase tracking-wide',
@@ -228,12 +231,12 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: { 
                   {[...tendencia].reverse().map(t => {
                     const diasMes = new Date(t.anio, t.mes, 0).getDate()
                     const promDia = t.total_ars > 0 ? Math.round(t.total_ars / diasMes) : 0
-                    const usdEquiv = tcBlue && t.total_ars > 0 ? Math.round(t.total_ars / tcBlue) : null
+                    const usdEquiv = tcOficial && t.total_ars > 0 ? Math.round(t.total_ars / tcOficial) : null
                     return (
                       <tr key={`${t.mes}-${t.anio}`}>
                         <td className="py-3 font-medium text-foreground">{t.label}</td>
                         <td className="py-3 text-right text-foreground tabular">{formatARS(t.total_ars)}</td>
-                        {tcBlue && (
+                        {tcOficial && (
                           <td className="py-3 text-right text-primary text-xs tabular">
                             {usdEquiv ? `USD ${usdEquiv.toLocaleString('es-AR')}` : '—'}
                           </td>

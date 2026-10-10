@@ -22,12 +22,16 @@ export const updateGastoSchema = z.object({
   comercio: z.string().max(200).optional(),
 })
 
-export const upsertPresupuestoSchema = z.object({
-  categoria: z.string().min(1),
-  mes: z.number().int().min(1).max(12),
-  anio: z.number().int().min(2020).max(2100),
-  monto_limite: z.number().positive(),
-})
+// Alta manual: lo mismo que la edición, con la categoría elegida de la lista.
+export const createGastoSchema = updateGastoSchema.refine(
+  // El formato solo no alcanza: "2026-02-31" pasa la regex y revienta en la base.
+  g => {
+    const [y, m, d] = g.fecha.split('-').map(Number)
+    const fecha = new Date(Date.UTC(y, m - 1, d))
+    return fecha.getUTCMonth() === m - 1 && fecha.getUTCDate() === d
+  },
+  { message: 'Esa fecha no existe' },
+)
 
 export const recurrenteSchema = z.object({
   descripcion: z.string().min(1).max(300),

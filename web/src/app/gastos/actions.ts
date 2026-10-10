@@ -2,8 +2,84 @@
 
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
-import { getTipoCambioActual } from '@/lib/queries'
-import { updateGastoSchema } from '@/lib/validation'
+import { getAllComercios, getCategorias, getTipoCambioActual } from '@/lib/queries'
+import { createGastoSchema, updateGastoSchema } from '@/lib/validation'
+import { hoyISO } from '@/lib/fechas'
+import { exigirSesion } from '@/lib/auth'
+
+/** Lo que necesita el formulario de alta: se pide recién al abrirlo. */
+export async function getOpcionesGastoAction(): Promise<{
+  categorias: string[]
+  comercios: string[]
+  hoy: string
+}> {
+  exigirSesion()
+  const [categorias, comercios] = await Promise.all([getCategorias(), getAllComercios()])
+  return { categorias: categorias.map(c => c.nombre), comercios, hoy: hoyISO() }
+}
+
+/**
+ * Alta manual de un gasto: lo que no llega por mail (efectivo, transferencias,
+ * la tarjeta que no avisa).
+ */
+export async function createGastoAction(fields: {
+  descripcion: string
+  monto: number
+  moneda: string
+  categoria: string
+  medio_pago: string
+  fecha: string
+  notas?: string
+  comercio?: string
+}): Promise<{ id: string }> {
+  exigirSesion()
+  const parsed = createGastoSchema.safeParse(fields)
+  if (!parsed.success) throw new Error(parsed.error.errors[0].message)
+  const datos = parsed.data
+
+  let monto_ars = datos.monto
+  let tipo_cambio = 1.0
+  let tipo_cambio_tipo = 'n/a'
+
+  if (datos.moneda === 'USD') {
+    const tc = (await getTipoCambioActual('oficial'))?.valor ?? null
+    // Sin cotización no se guarda: un gasto en dólares con el monto en pesos
+    // inventado queda mal en todos los totales y no avisa.
+    if (!tc) throw new Error('No pude obtener el tipo de cambio. Probá de nuevo en un rato.')
+    monto_ars = Math.round(datos.monto * tc * 100) / 100
+    tipo_cambio = tc
+    tipo_cambio_tipo = 'oficial'
+  }
+
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('gastos')
+    .insert({
+      descripcion: datos.descripcion.trim(),
+      monto_original: datos.monto,
+      moneda: datos.moneda,
+      monto_ars,
+      tipo_cambio,
+      tipo_cambio_tipo,
+      categoria: datos.categoria,
+      medio_pago: datos.medio_pago,
+      fecha: datos.fecha,
+      notas: datos.notas?.trim() || null,
+      comercio: datos.comercio?.trim() || null,
+      cuotas: 1,
+      cuota_actual: 1,
+      fuente: 'web_manual',
+    })
+    .select('id')
+    .single()
+
+  if (error) throw new Error(error.message)
+
+  revalidatePath('/gastos')
+  revalidatePath('/dashboard')
+  revalidatePath('/analytics')
+  return { id: data.id }
+}
 
 export async function updateGastoAction(
   id: string,
@@ -18,6 +94,7 @@ export async function updateGastoAction(
     comercio?: string
   },
 ) {
+  exigirSesion()
   const parsed = updateGastoSchema.safeParse(fields)
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
 
@@ -99,6 +176,7 @@ export async function vincularRecurrenteAction(
   recurrenteId: string | null,
   comercio?: string,
 ) {
+  exigirSesion()
   const supabase = getSupabaseServer()
 
   await supabase
@@ -153,7 +231,7 @@ export async function vincularRecurrenteAction(
   // hasta superar la fecha del pago para no desalinear la ventana futura.
   if (rec?.proximo_vencimiento) {
     const frecuencia = rec.frecuencia ?? 'mensual'
-    const ancla = gasto?.fecha ?? new Date().toISOString().split('T')[0]
+    const ancla = gasto?.fecha ?? hoyISO()
     let nueva = siguienteVencimiento(rec.proximo_vencimiento, frecuencia)
     let guard = 0
     while (nueva <= ancla && guard < 120) {
@@ -175,6 +253,7 @@ export async function vincularRecurrenteAction(
 }
 
 export async function deleteGastoAction(id: string) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const { error } = await supabase
     .from('gastos')
@@ -186,6 +265,7 @@ export async function deleteGastoAction(id: string) {
 }
 
 export async function bulkRecategorizarAction(ids: string[], categoria: string) {
+  exigirSesion()
   if (!ids.length || !categoria) return
   const supabase = getSupabaseServer()
   const { error } = await supabase.from('gastos').update({ categoria }).in('id', ids)
@@ -195,6 +275,7 @@ export async function bulkRecategorizarAction(ids: string[], categoria: string) 
 }
 
 export async function bulkDeleteGastosAction(ids: string[]) {
+  exigirSesion()
   if (!ids.length) return
   const supabase = getSupabaseServer()
   const { error } = await supabase

@@ -7,6 +7,8 @@ import { env } from '@/lib/env'
 import { construirEml } from '@/lib/mime'
 import { ASUNTO, cuerpo, mesDelPeriodo } from '@/lib/plantillaConsorcio'
 import { getSupabaseServer } from '@/lib/supabase'
+import { exigirSesion } from '@/lib/auth'
+import { ahoraAR } from '@/lib/fechas'
 
 export type ResultadoBorrador =
   | { ok: true; nombreArchivo: string; emlBase64: string }
@@ -28,6 +30,7 @@ export type ResultadoBorrador =
 export async function crearBorradorConsorcioAction(
   facturaId: string,
 ): Promise<ResultadoBorrador> {
+  exigirSesion()
   try {
     return { ok: true, ...(await generarEml(facturaId)) }
   } catch (e: any) {
@@ -69,7 +72,7 @@ async function generarEml(
     para: env.CONSORCIO_EMAIL,
     bcc: env.CONSORCIO_BCC,
     asunto: ASUNTO,
-    cuerpo: cuerpo(vencimiento),
+    cuerpo: cuerpo(vencimiento, ahoraAR()),
     adjuntos: [{
       filename: comprobante.drive_file_name,
       content,

@@ -1,4 +1,5 @@
 import Sidebar from '@/components/Sidebar'
+import SeccionTabs from '@/components/SeccionTabs'
 import PlanesCuotaView from '@/components/PlanesCuotaView'
 import { getPlanesCuota, getCategorias } from '@/lib/queries'
 
@@ -21,6 +22,7 @@ export default async function CuotasPage() {
 
       <main className="flex-1 px-4 md:px-8 pt-6 pb-safe-24 md:py-8 md:pb-8 overflow-auto">
         <div className="max-w-3xl mx-auto">
+          <SeccionTabs />
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Planes de cuotas</h1>

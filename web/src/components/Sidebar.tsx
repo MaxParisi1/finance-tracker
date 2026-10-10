@@ -4,34 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { useTheme } from 'next-themes'
-import {
-  LayoutDashboard,
-  CreditCard,
-  FileText,
-  BarChart3,
-  RefreshCw,
-  ChevronLeft,
-  Sun,
-  Moon,
-  Layers,
-  History,
-  Plus,
-  CalendarClock,
-  ClipboardCheck,
-} from 'lucide-react'
+import { ChevronLeft, Sun, Moon, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-const NAV_ITEMS = [
-  { href: '/dashboard',    label: 'Panel',        icon: LayoutDashboard },
-  { href: '/agenda',       label: 'Lo que viene', icon: CalendarClock },
-  { href: '/recurrentes',  label: 'Fijos',        icon: RefreshCw, badge: true },
-  { href: '/cuotas',       label: 'Cuotas',       icon: Layers },
-  { href: '/gastos',       label: 'Gastos',       icon: CreditCard },
-  { href: '/comprobantes', label: 'Comprobantes', icon: FileText },
-  { href: '/registro',     label: 'Registro',     icon: ClipboardCheck },
-  { href: '/analytics',    label: 'Analíticas',   icon: BarChart3 },
-  { href: '/historico',    label: 'Histórico',    icon: History },
-]
+import { SECCIONES } from '@/lib/nav'
+import { EVENTO_NUEVO_GASTO } from '@/components/NuevoGastoModal'
 
 export default function Sidebar({ pendientes }: { pendientes?: number }) {
   const pathname = usePathname()
@@ -61,14 +37,15 @@ export default function Sidebar({ pendientes }: { pendientes?: number }) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {NAV_ITEMS.map(item => {
-          const active = pathname.startsWith(item.href)
+        {SECCIONES.map(item => {
+          const href = item.tabs[0].href
+          const active = item.tabs.some(t => pathname.startsWith(t.href))
           const Icon = item.icon
           const showBadge = item.badge && pendientes && pendientes > 0
           return (
             <Link
-              key={item.href}
-              href={item.href}
+              key={href}
+              href={href}
               title={collapsed ? item.label : undefined}
               className={cn(
                 'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors',
@@ -95,10 +72,10 @@ export default function Sidebar({ pendientes }: { pendientes?: number }) {
         })}
       </nav>
 
-      {/* Registrar gasto → abre el asistente */}
+      {/* Registrar gasto → abre el formulario de alta */}
       <div className="px-3 pb-2">
         <button
-          onClick={() => window.dispatchEvent(new Event('open-chat'))}
+          onClick={() => window.dispatchEvent(new Event(EVENTO_NUEVO_GASTO))}
           title="Registrar gasto"
           className={cn(
             'w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground font-medium text-[13.5px] py-2.5 transition-opacity hover:opacity-90',

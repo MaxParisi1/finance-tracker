@@ -4,6 +4,7 @@ import GastosTableView from '@/components/GastosTableView'
 import GlobalSearchInput from '@/components/GlobalSearchInput'
 import { getGastosMes, searchGastos, getCategorias, getAllComercios, contarArchivosPorGastos, getRecurrentes } from '@/lib/queries'
 import { formatARS, monthLabel } from '@/lib/utils'
+import { ahoraAR } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +13,7 @@ export default async function GastosPage({
 }: {
   searchParams: { mes?: string; anio?: string; q?: string }
 }) {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const q = searchParams.q?.trim() ?? ''
   const isSearching = q.length > 0
 

@@ -20,7 +20,7 @@ interface Props {
   recurrentes: RecurrenteConCosto[]
   total_mensual_ars: number
   total_anual_ars: number
-  tc_blue: number | null
+  tc_oficial: number | null
   tc_fecha: string | null
   tc_es_hoy: boolean
   categorias: string[]
@@ -49,7 +49,7 @@ const stripeTone: Record<string, string> = {
 
 export default function RecurrentesView({
   recurrentes, total_mensual_ars, total_anual_ars,
-  tc_blue, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio, esMesActual,
+  tc_oficial, tc_fecha, tc_es_hoy, categorias, fijos, mesLabel, mes, anio, esMesActual,
 }: Props) {
   const [editing, setEditing] = useState<GastoRecurrente | null>(null)
   const [registrando, setRegistrando] = useState<{ rec: RecurrenteConCosto; fechaDefault?: string; mesLabel?: string } | null>(null)
@@ -138,9 +138,9 @@ export default function RecurrentesView({
             <Stat k="Ya pagaste este mes" v={formatARS(fijos.total_pagado_ars)} />
             <Stat k="Compromiso mensual" v={formatARS(total_mensual_ars)} sub={`${recurrentes.length} activos`} />
             <Stat k="Compromiso anual" v={formatARS(total_anual_ars)} />
-            {tc_blue && (
-              <Stat k="Equiv. mensual USD" v={`US$ ${Math.round(total_mensual_ars / tc_blue).toLocaleString('es-AR')}`}
-                sub={`TC $${tc_blue.toLocaleString('es-AR')}${tc_fecha ? (tc_es_hoy ? ' · hoy' : ` · ${tc_fecha}`) : ''}`} />
+            {tc_oficial && (
+              <Stat k="Equiv. mensual USD" v={`US$ ${Math.round(total_mensual_ars / tc_oficial).toLocaleString('es-AR')}`}
+                sub={`TC $${tc_oficial.toLocaleString('es-AR')}${tc_fecha ? (tc_es_hoy ? ' · hoy' : ` · ${tc_fecha}`) : ''}`} />
             )}
           </div>
         </CardContent>

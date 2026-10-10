@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { getSupabaseServer } from '@/lib/supabase'
 import { getTipoCambioActual } from '@/lib/queries'
+import { ahoraAR } from '@/lib/fechas'
+import { exigirSesion } from '@/lib/auth'
 
 // Local date formatting — avoids toISOString() UTC offset shifting the date
 function formatDate(y: number, m: number, d: number): string {
@@ -11,7 +13,7 @@ function formatDate(y: number, m: number, d: number): string {
 
 // Next occurrence of diaDelMes on or after today (all local arithmetic)
 function nextVencimiento(diaDelMes: number): string {
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const y = hoy.getFullYear()
   const m = hoy.getMonth() + 1
   const d = hoy.getDate()
@@ -59,6 +61,7 @@ export async function createPlanCuotaAction(fields: {
   dia_del_mes: number
   tipo: 'fijo' | 'variable'
 }) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const proximo_vencimiento = nextVencimiento(fields.dia_del_mes)
 
@@ -92,6 +95,7 @@ export async function updatePlanCuotaAction(
     tipo: 'fijo' | 'variable'
   },
 ) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const proximo_vencimiento = nextVencimiento(fields.dia_del_mes)
 
@@ -113,6 +117,7 @@ export async function updatePlanCuotaAction(
 // ── Activar / desactivar ────────────────────────────────────
 
 export async function togglePlanCuotaAction(id: string, activo: boolean) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const { error } = await supabase
     .from('planes_cuota')
@@ -141,6 +146,7 @@ export async function registrarPagoCuotaAction(
     diaDelMes: number
   },
 ) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const moneda = fields.moneda.toUpperCase()
 
@@ -194,8 +200,9 @@ export async function materializarPlanesFijosAction(): Promise<{
   omitidos: number
   errores: string[]
 }> {
+  exigirSesion()
   const supabase = getSupabaseServer()
-  const hoy = new Date()
+  const hoy = ahoraAR()
   const todayStr = formatDate(hoy.getFullYear(), hoy.getMonth() + 1, hoy.getDate())
 
   const { data: planes, error } = await supabase

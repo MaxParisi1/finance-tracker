@@ -78,12 +78,6 @@ const config: Config = {
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         // Magic UI
-        'gradient': {
-          to: { backgroundPosition: 'var(--bg-size) 0' },
-        },
-        'border-beam': {
-          '100%': { offsetDistance: '100%' },
-        },
         'shimmer-slide': {
           to: { transform: 'translate(calc(100cqw - 100%), 0)' },
         },
@@ -98,8 +92,6 @@ const config: Config = {
         'fade-in':      'fade-in 0.2s ease-out',
         'slide-up':     'slide-up 0.3s ease-out',
         // Magic UI
-        'gradient':     'gradient 6s linear infinite',
-        'border-beam':  'border-beam linear infinite',
         'shimmer-slide': 'shimmer-slide var(--speed) ease-in-out infinite alternate',
         'spin-around':  'spin-around calc(var(--speed) * 2) infinite linear',
       },

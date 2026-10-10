@@ -4,9 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BlurFade } from '@/components/magicui/blur-fade'
 import {
   getResumenMes, getGastosRecientes, getCategorias, getRecurrentesConCosto,
-  getFijosDelMes, getAgenda, getTendencia,
+  getFijosDelMes, getAgenda, getTendencia, getPendientes,
 } from '@/lib/queries'
 import { formatARS, monthLabel, cn } from '@/lib/utils'
+import { ahoraAR, hoyISO } from '@/lib/fechas'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,15 +25,15 @@ function agendaLabel(fecha: string, sinFecha: boolean, hoy: string): string {
 }
 
 export default async function DashboardPage() {
-  const hoy = new Date()
-  const hoyStr = hoy.toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' })
+  const hoy = ahoraAR()
+  const hoyStr = hoyISO()
   const mes = hoy.getMonth() + 1
   const anio = hoy.getFullYear()
   const mesAnterior = mes === 1 ? 12 : mes - 1
   const anioAnterior = mes === 1 ? anio - 1 : anio
 
   const categorias = await getCategorias()
-  const [resumenActual, resumenAnterior, recientes, recurrentes, fijos, agenda, tendencia] =
+  const [resumenActual, resumenAnterior, recientes, recurrentes, fijos, agenda, tendencia, pendientes] =
     await Promise.all([
       getResumenMes(mes, anio, categorias),
       getResumenMes(mesAnterior, anioAnterior, categorias),
@@ -41,8 +42,10 @@ export default async function DashboardPage() {
       getFijosDelMes(mes, anio),
       getAgenda(),
       getTendencia(4),
+      // La bandeja es un extra: si falla, el Panel se muestra igual.
+      getPendientes().catch(() => []),
     ])
-  const tcBlue = recurrentes.tc_blue
+  const tcOficial = recurrentes.tc_oficial
 
   const variacion = resumenAnterior.total_ars > 0
     ? Math.round(((resumenActual.total_ars - resumenAnterior.total_ars) / resumenAnterior.total_ars) * 1000) / 10
@@ -52,7 +55,7 @@ export default async function DashboardPage() {
   const diasTotales = new Date(anio, mes, 0).getDate()
   const promedioDiario = diasTranscurridos > 0 ? resumenActual.total_ars / diasTranscurridos : 0
   const proyeccion = Math.round(promedioDiario * diasTotales)
-  const equivalenteUSD = tcBlue && resumenActual.total_ars > 0 ? Math.round(resumenActual.total_ars / tcBlue) : null
+  const equivalenteUSD = tcOficial && resumenActual.total_ars > 0 ? Math.round(resumenActual.total_ars / tcOficial) : null
 
   // Promedio de los 3 meses previos (excluye el actual)
   const previos = tendencia.slice(0, -1).filter(t => t.total_ars > 0)
@@ -91,6 +94,43 @@ export default async function DashboardPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Panel</h1>
             <p className="text-muted-foreground text-sm mt-1">{monthLabel(mes, anio)} · día {diasTranscurridos} de {diasTotales}</p>
           </div>
+
+          {/* Requiere tu atención: solo aparece si hay algo */}
+          {pendientes.length > 0 && (
+            <BlurFade delay={0} className="mb-5">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Requiere tu atención</CardTitle>
+                    <span className="text-xs font-semibold tabular text-muted-foreground">{pendientes.length}</span>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ul className="divide-y divide-border">
+                    {pendientes.map((p, i) => {
+                      const cuerpo = (
+                        <>
+                          <span className={cn('mt-1.5 w-2 h-2 rounded-full flex-shrink-0', p.tono === 'urgente' ? 'bg-destructive' : 'bg-warning')} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-foreground">{p.titulo}</span>
+                            <span className="block text-[12.5px] text-muted-foreground mt-0.5">{p.detalle}</span>
+                          </span>
+                          {p.href && <span className="text-xs text-primary font-medium whitespace-nowrap self-center">Ver →</span>}
+                        </>
+                      )
+                      return (
+                        <li key={i}>
+                          {p.href
+                            ? <a href={p.href} className="flex items-start gap-3 py-3 hover:bg-muted/50 -mx-2 px-2 rounded-lg transition-colors">{cuerpo}</a>
+                            : <div className="flex items-start gap-3 py-3">{cuerpo}</div>}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </CardContent>
+              </Card>
+            </BlurFade>
+          )}
 
           {/* Estado de pagos + categorías */}
           <BlurFade delay={0} className="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-5">

@@ -5,9 +5,11 @@ import { getSupabaseServer } from '@/lib/supabase'
 import { getTipoCambioActual } from '@/lib/queries'
 import { recurrenteSchema } from '@/lib/validation'
 import { subirArchivoDrive } from '@/lib/drive'
+import { ahoraAR, hoyISO } from '@/lib/fechas'
+import { exigirSesion } from '@/lib/auth'
 
 function nextDueDate(diaDelMes: number | null, frecuencia: string, mesDelAnio?: number): string {
-  const hoy = new Date()
+  const hoy = ahoraAR()
 
   if (frecuencia === 'anual') {
     const mesIdx = (mesDelAnio ?? hoy.getMonth() + 1) - 1
@@ -38,8 +40,9 @@ export async function materializarRecurrentesAction(): Promise<{
   omitidos: number
   errores: string[]
 }> {
+  exigirSesion()
   const supabase = getSupabaseServer()
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = hoyISO()
 
   // Traer recurrentes cuyo próximo vencimiento ya llegó
   const { data: recurrentes, error: errFetch } = await supabase
@@ -52,7 +55,7 @@ export async function materializarRecurrentesAction(): Promise<{
   if (errFetch) throw new Error(errFetch.message)
   if (!recurrentes || recurrentes.length === 0) return { insertados: 0, omitidos: 0, errores: [] }
 
-  const tc_blue = (await getTipoCambioActual('oficial'))?.valor ?? null
+  const tc_oficial = (await getTipoCambioActual('oficial'))?.valor ?? null
 
   let insertados = 0
   let omitidos = 0
@@ -61,8 +64,8 @@ export async function materializarRecurrentesAction(): Promise<{
   for (const r of recurrentes) {
     try {
       const moneda = r.moneda?.toUpperCase() ?? 'ARS'
-      const monto_ars = moneda === 'USD' && tc_blue
-        ? Math.round(r.monto_original * tc_blue)
+      const monto_ars = moneda === 'USD' && tc_oficial
+        ? Math.round(r.monto_original * tc_oficial)
         : r.monto_original
 
       // Verificar si ya se materializó este vencimiento (evitar duplicados)
@@ -83,7 +86,7 @@ export async function materializarRecurrentesAction(): Promise<{
           monto_original: r.monto_original,
           moneda,
           monto_ars,
-          tipo_cambio: moneda === 'USD' ? (tc_blue ?? 1) : 1,
+          tipo_cambio: moneda === 'USD' ? (tc_oficial ?? 1) : 1,
           tipo_cambio_tipo: moneda === 'USD' ? 'oficial' : 'n/a',
           categoria: r.categoria,
           medio_pago: r.medio_pago,
@@ -135,6 +138,7 @@ export async function createRecurrenteAction(fields: {
   mes_del_anio?: number
   no_materializar?: boolean
 }) {
+  exigirSesion()
   const parsed = recurrenteSchema.safeParse(fields)
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
 
@@ -167,6 +171,7 @@ export async function updateRecurrenteAction(
     no_materializar?: boolean
   },
 ) {
+  exigirSesion()
   const parsed = recurrenteSchema.safeParse(fields)
   if (!parsed.success) throw new Error(parsed.error.errors[0].message)
 
@@ -184,6 +189,7 @@ export async function updateRecurrenteAction(
 }
 
 export async function toggleRecurrenteAction(id: string, activo: boolean) {
+  exigirSesion()
   const supabase = getSupabaseServer()
   const { error } = await supabase
     .from('gastos_recurrentes')
@@ -197,6 +203,7 @@ export async function toggleRecurrenteAction(id: string, activo: boolean) {
 export async function registrarCobroAction(
   formData: FormData,
 ): Promise<{ fallidos: string[] }> {
+  exigirSesion()
   const recurrenteId = formData.get('recurrenteId') as string
   const monto = parseFloat(formData.get('monto') as string)
   const moneda = (formData.get('moneda') as string).toUpperCase()

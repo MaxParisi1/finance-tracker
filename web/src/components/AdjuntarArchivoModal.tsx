@@ -8,6 +8,7 @@ import SelectorArchivos, { type ArchivoPendiente } from '@/components/ui/Selecto
 import { subirYVincularArchivoAction } from '@/app/comprobantes/actions'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 interface Props {
   gastoId: string
@@ -88,68 +89,63 @@ export default function AdjuntarArchivoModal({
   )
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-card text-card-foreground rounded-2xl rounded-t-3xl sm:rounded-2xl shadow-modal border border-border w-full max-w-lg flex flex-col max-h-[90vh] animate-slide-up sm:animate-fade-in">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
-          <h2 className="text-base font-semibold">
-            Adjuntar documentos
-            {archivos.length > 0 && (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {archivos.length} {archivos.length === 1 ? 'archivo' : 'archivos'}
-              </span>
-            )}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Modal onClose={onClose} className="max-w-lg max-h-[90vh]">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
+        <ModalTitle>
+          Adjuntar documentos
+          {archivos.length > 0 && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {archivos.length} {archivos.length === 1 ? 'archivo' : 'archivos'}
+            </span>
+          )}
+        </ModalTitle>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        <div className="px-6 py-4 space-y-4 overflow-y-auto">
-          <SelectorArchivos
-            archivos={archivos}
-            onChange={setArchivos}
-            fecha={fechaVal}
-            comercio={comercio}
+      <div className="px-6 py-4 space-y-4 overflow-y-auto">
+        <SelectorArchivos
+          archivos={archivos}
+          onChange={setArchivos}
+          fecha={fechaVal}
+          comercio={comercio}
+          disabled={isPending}
+        />
+
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Fecha de los documentos
+          </label>
+          <input
+            type="date"
+            value={fechaVal}
+            onChange={e => setFechaVal(e.target.value)}
+            className={fieldClass}
             disabled={isPending}
           />
-
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Fecha de los documentos
-            </label>
-            <input
-              type="date"
-              value={fechaVal}
-              onChange={e => setFechaVal(e.target.value)}
-              className={fieldClass}
-              disabled={isPending}
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
-            Cerrar
-          </Button>
-          <ShimmerButton
-            onClick={handleSubmit}
-            disabled={isPending || restantes === 0 || !fechaVal}
-            shimmerDuration="2s"
-            borderRadius="6px"
-            className="h-8 px-4 text-xs"
-          >
-            {isPending ? 'Subiendo...'
-              : restantes <= 1 ? 'Subir y vincular'
-              : `Subir ${restantes} y vincular`}
-          </ShimmerButton>
         </div>
       </div>
-    </div>
+
+      <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border flex-shrink-0">
+        <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
+          Cerrar
+        </Button>
+        <ShimmerButton
+          onClick={handleSubmit}
+          disabled={isPending || restantes === 0 || !fechaVal}
+          shimmerDuration="2s"
+          borderRadius="6px"
+          className="h-8 px-4 text-xs"
+        >
+          {isPending ? 'Subiendo...'
+            : restantes <= 1 ? 'Subir y vincular'
+            : `Subir ${restantes} y vincular`}
+        </ShimmerButton>
+      </div>
+    </Modal>
   )
 }

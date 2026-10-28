@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatMontoAR, parseMontoAR } from '@/lib/montos'
+import { cn } from '@/lib/utils'
 
 interface Props {
   value: number | string | null | undefined
@@ -42,7 +43,7 @@ export default function MontoInput({
       type="text"
       inputMode="decimal"
       autoComplete="off"
-      className={className}
+      className={cn('tabular', className)}
       placeholder={placeholder}
       autoFocus={autoFocus}
       disabled={disabled}

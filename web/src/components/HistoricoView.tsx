@@ -205,7 +205,7 @@ export default function HistoricoView({ meses, gastos, categorias, filtros }: Pr
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      <span className="font-semibold text-foreground">{formatARS(g.monto_ars ?? 0)}</span>
+                      <span className="font-semibold text-foreground tabular">{formatARS(g.monto_ars ?? 0)}</span>
                       {g.moneda === 'USD' && (
                         <span className="text-xs text-muted-foreground ml-1">
                           (u$s {g.monto_original.toLocaleString('es-AR')})

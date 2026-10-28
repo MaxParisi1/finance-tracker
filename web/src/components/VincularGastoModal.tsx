@@ -7,6 +7,7 @@ import { vincularArchivoExistenteAction } from '@/app/comprobantes/actions'
 import { toast } from 'sonner'
 import { formatARS, formatDate, cn } from '@/lib/utils'
 import type { Gasto } from '@/lib/types'
+import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 interface Props {
   archivoId: string
@@ -50,93 +51,90 @@ export default function VincularGastoModal({ archivoId, comercio, gastos, onClos
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-background border border-border rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[80vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <Link2 className="w-4 h-4 text-primary" />
-            <h2 className="font-semibold text-foreground text-sm">Vincular a un gasto</h2>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
-            <X className="w-4 h-4" />
-          </button>
+    <Modal onClose={onClose} className="max-w-md max-h-[80vh]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Link2 className="w-4 h-4 text-primary" />
+          <ModalTitle className="font-semibold text-foreground text-sm">Vincular a un gasto</ModalTitle>
         </div>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        {/* Search */}
-        <div className="px-4 py-3 border-b border-border flex-shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <input
-              autoFocus
-              type="text"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setSelected(null) }}
-              placeholder="Buscar por comercio o descripción…"
-              className={cn(
-                'w-full h-9 rounded-lg border border-input bg-muted/30 pl-9 pr-3 text-sm',
-                'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-colors',
-              )}
-            />
-          </div>
-        </div>
-
-        {/* List */}
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {filtered.length === 0 ? (
-            <p className="text-center text-muted-foreground text-sm py-8">Sin resultados</p>
-          ) : (
-            <ul className="space-y-0.5">
-              {filtered.map(g => (
-                <li key={g.id}>
-                  <button
-                    onClick={() => setSelected(g.id === selected ? null : g.id)}
-                    className={cn(
-                      'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors',
-                      selected === g.id
-                        ? 'bg-secondary border border-primary/30'
-                        : 'hover:bg-muted/50',
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {g.comercio || g.descripcion}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatDate(g.fecha)} · {g.categoria ?? '—'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                      <span className="text-sm font-semibold text-foreground">
-                        {formatARS(g.monto_ars ?? 0)}
-                      </span>
-                      {selected === g.id && (
-                        <Check className="w-4 h-4 text-primary" />
-                      )}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-border flex gap-2 justify-end flex-shrink-0">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={isPending}>
-            Cancelar
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleConfirm}
-            disabled={!selected || isPending || done}
-            className="bg-primary hover:opacity-90 text-primary-foreground"
-          >
-            {done ? <Check className="w-4 h-4" /> : isPending ? 'Vinculando…' : 'Vincular'}
-          </Button>
+      {/* Search */}
+      <div className="px-4 py-3 border-b border-border flex-shrink-0">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            autoFocus
+            type="text"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setSelected(null) }}
+            placeholder="Buscar por comercio o descripción…"
+            className={cn(
+              'w-full h-9 rounded-lg border border-input bg-muted/30 pl-9 pr-3 text-sm',
+              'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-colors',
+            )}
+          />
         </div>
       </div>
-    </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-2 py-2">
+        {filtered.length === 0 ? (
+          <p className="text-center text-muted-foreground text-sm py-8">Sin resultados</p>
+        ) : (
+          <ul className="space-y-0.5">
+            {filtered.map(g => (
+              <li key={g.id}>
+                <button
+                  onClick={() => setSelected(g.id === selected ? null : g.id)}
+                  className={cn(
+                    'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors',
+                    selected === g.id
+                      ? 'bg-secondary border border-primary/30'
+                      : 'hover:bg-muted/50',
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {g.comercio || g.descripcion}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {formatDate(g.fecha)} · {g.categoria ?? '—'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                    <span className="text-sm font-semibold text-foreground tabular">
+                      {formatARS(g.monto_ars ?? 0)}
+                    </span>
+                    {selected === g.id && (
+                      <Check className="w-4 h-4 text-primary" />
+                    )}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-border flex gap-2 justify-end flex-shrink-0">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={isPending}>
+          Cancelar
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleConfirm}
+          disabled={!selected || isPending || done}
+          className="bg-primary hover:opacity-90 text-primary-foreground"
+        >
+          {done ? <Check className="w-4 h-4" /> : isPending ? 'Vinculando…' : 'Vincular'}
+        </Button>
+      </div>
+    </Modal>
   )
 }

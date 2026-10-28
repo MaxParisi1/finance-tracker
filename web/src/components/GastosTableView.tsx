@@ -151,7 +151,7 @@ export default function GastosTableView({ gastos, categorias, colores = {}, come
 
       {/* Resumen + strip de distribución */}
       <div className="flex items-center gap-3 mb-2 text-sm text-muted-foreground">
-        <span><span className="font-semibold text-foreground">{filtered.length}</span> gastos · <span className="font-semibold text-foreground">{formatARS(totalARS)}</span>
+        <span><span className="font-semibold text-foreground">{filtered.length}</span> gastos · <span className="font-semibold text-foreground tabular">{formatARS(totalARS)}</span>
           {hasFilters && gastos.length !== filtered.length && <span> (de {gastos.length})</span>}</span>
         {totalUSD > 0 && <span className="text-primary font-medium">· USD {totalUSD.toFixed(2)}</span>}
       </div>

@@ -30,7 +30,7 @@ function CustomTooltip({ active, payload }: any) {
   return (
     <div className="bg-popover border border-border rounded-lg px-4 py-3 shadow-md text-sm">
       <p className="font-semibold text-foreground">{d.label}</p>
-      <p className="text-primary font-bold mt-1">{formatARS(d.total_ars)}</p>
+      <p className="text-primary font-bold mt-1 tabular">{formatARS(d.total_ars)}</p>
       <p className="text-muted-foreground text-xs mt-0.5">{d.cantidad} gasto{d.cantidad !== 1 ? 's' : ''}</p>
     </div>
   )

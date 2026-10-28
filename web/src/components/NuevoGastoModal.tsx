@@ -7,6 +7,7 @@ import { createGastoAction, getOpcionesGastoAction } from '@/app/gastos/actions'
 import { MEDIO_PAGO_LABELS, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import MontoInput from '@/components/ui/MontoInput'
+import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 /** Evento que disparan los botones "Registrar gasto" de la navegación. */
 export const EVENTO_NUEVO_GASTO = 'nuevo-gasto'
@@ -92,100 +93,95 @@ export default function NuevoGastoModal() {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) setAbierto(false) }}
-    >
-      <div className="bg-card text-card-foreground rounded-2xl sm:rounded-2xl rounded-t-3xl shadow-modal border border-border w-full max-w-md flex flex-col animate-slide-up sm:animate-fade-in">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-base font-semibold">Registrar gasto</h2>
-          <button
-            onClick={() => setAbierto(false)}
-            aria-label="Cerrar"
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
-          </button>
-        </div>
+    <Modal onClose={() => setAbierto(false)} className="max-w-md">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <ModalTitle>Registrar gasto</ModalTitle>
+        <button
+          onClick={() => setAbierto(false)}
+          aria-label="Cerrar"
+          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+          </svg>
+        </button>
+      </div>
 
-        <div className="px-6 py-4 space-y-4 overflow-y-auto max-h-[60vh]">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={labelClass}>Monto</label>
-              <MontoInput value={form.monto} onChange={n => set('monto', n)} className={fieldClass} autoFocus placeholder="0,00" />
-            </div>
-            <div>
-              <label className={labelClass}>Moneda</label>
-              <select value={form.moneda} onChange={e => set('moneda', e.target.value)} className={cn(fieldClass, 'w-24 cursor-pointer')}>
-                <option value="ARS">ARS</option>
-                <option value="USD">USD</option>
-              </select>
-            </div>
+      <div className="px-6 py-4 space-y-4 overflow-y-auto max-h-[60vh]">
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className={labelClass}>Monto</label>
+            <MontoInput value={form.monto} onChange={n => set('monto', n)} className={fieldClass} autoFocus placeholder="0,00" />
           </div>
-
           <div>
-            <label className={labelClass}>Descripción</label>
-            <input type="text" value={form.descripcion} onChange={e => set('descripcion', e.target.value)} className={fieldClass} placeholder="Qué fue" />
-          </div>
-
-          <div>
-            <label className={labelClass}>Comercio</label>
-            <input
-              type="text"
-              list="nuevo-gasto-comercios"
-              value={form.comercio}
-              onChange={e => set('comercio', e.target.value)}
-              placeholder="Opcional"
-              className={fieldClass}
-            />
-            <datalist id="nuevo-gasto-comercios">
-              {(opciones?.comercios ?? []).map(c => <option key={c} value={c} />)}
-            </datalist>
-          </div>
-
-          <div>
-            <label className={labelClass}>Categoría</label>
-            <select value={form.categoria} onChange={e => set('categoria', e.target.value)} className={cn(fieldClass, 'cursor-pointer')} disabled={!opciones}>
-              <option value="">{opciones ? 'Elegí una' : 'Cargando…'}</option>
-              {(opciones?.categorias ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+            <label className={labelClass}>Moneda</label>
+            <select value={form.moneda} onChange={e => set('moneda', e.target.value)} className={cn(fieldClass, 'w-24 cursor-pointer')}>
+              <option value="ARS">ARS</option>
+              <option value="USD">USD</option>
             </select>
           </div>
-
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={labelClass}>Medio de pago</label>
-              <select value={form.medio_pago} onChange={e => set('medio_pago', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
-                {MEDIO_PAGO_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex-1">
-              <label className={labelClass}>Fecha</label>
-              <input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className={fieldClass} />
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass}>Notas</label>
-            <textarea
-              value={form.notas}
-              onChange={e => set('notas', e.target.value)}
-              rows={2}
-              className={cn(fieldClass, 'h-auto py-2 resize-none')}
-            />
-          </div>
-
-          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border">
-          <Button variant="ghost" onClick={() => setAbierto(false)} disabled={isPending}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={isPending}>{isPending ? 'Guardando…' : 'Guardar'}</Button>
+        <div>
+          <label className={labelClass}>Descripción</label>
+          <input type="text" value={form.descripcion} onChange={e => set('descripcion', e.target.value)} className={fieldClass} placeholder="Qué fue" />
         </div>
+
+        <div>
+          <label className={labelClass}>Comercio</label>
+          <input
+            type="text"
+            list="nuevo-gasto-comercios"
+            value={form.comercio}
+            onChange={e => set('comercio', e.target.value)}
+            placeholder="Opcional"
+            className={fieldClass}
+          />
+          <datalist id="nuevo-gasto-comercios">
+            {(opciones?.comercios ?? []).map(c => <option key={c} value={c} />)}
+          </datalist>
+        </div>
+
+        <div>
+          <label className={labelClass}>Categoría</label>
+          <select value={form.categoria} onChange={e => set('categoria', e.target.value)} className={cn(fieldClass, 'cursor-pointer')} disabled={!opciones}>
+            <option value="">{opciones ? 'Elegí una' : 'Cargando…'}</option>
+            {(opciones?.categorias ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className={labelClass}>Medio de pago</label>
+            <select value={form.medio_pago} onChange={e => set('medio_pago', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
+              {MEDIO_PAGO_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className={labelClass}>Fecha</label>
+            <input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className={fieldClass} />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Notas</label>
+          <textarea
+            value={form.notas}
+            onChange={e => set('notas', e.target.value)}
+            rows={2}
+            className={cn(fieldClass, 'h-auto py-2 resize-none')}
+          />
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
-    </div>
+
+      <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border">
+        <Button variant="ghost" onClick={() => setAbierto(false)} disabled={isPending}>Cancelar</Button>
+        <Button onClick={handleSave} disabled={isPending}>{isPending ? 'Guardando…' : 'Guardar'}</Button>
+      </div>
+    </Modal>
   )
 }

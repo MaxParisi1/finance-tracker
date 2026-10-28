@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { toast } from 'sonner'
 import MontoInput from '@/components/ui/MontoInput'
+import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 const FRECUENCIA_OPTIONS = [
   { value: 'mensual', label: 'Mensual' },
@@ -100,192 +101,187 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-card text-card-foreground rounded-2xl sm:rounded-2xl rounded-t-3xl shadow-modal border border-border w-full max-w-md flex flex-col animate-slide-up sm:animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-base font-semibold">
-            {isEdit ? 'Editar recurrente' : 'Nuevo gasto recurrente'}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
-          </button>
+    <Modal onClose={onClose} className="max-w-md">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <ModalTitle>
+          {isEdit ? 'Editar recurrente' : 'Nuevo gasto recurrente'}
+        </ModalTitle>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Form */}
+      <div className="px-6 py-4 space-y-4 overflow-y-auto max-h-[60vh]">
+        <div>
+          <label className={labelClass}>Descripción</label>
+          <input
+            type="text" value={form.descripcion}
+            onChange={e => set('descripcion', e.target.value)}
+            className={fieldClass}
+            placeholder="Netflix, Spotify, Expensas..."
+          />
         </div>
 
-        {/* Form */}
-        <div className="px-6 py-4 space-y-4 overflow-y-auto max-h-[60vh]">
-          <div>
-            <label className={labelClass}>Descripción</label>
-            <input
-              type="text" value={form.descripcion}
-              onChange={e => set('descripcion', e.target.value)}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className={labelClass}>Monto</label>
+            <MontoInput
+              value={form.monto_original}
+              onChange={n => set('monto_original', n ?? 0)}
               className={fieldClass}
-              placeholder="Netflix, Spotify, Expensas..."
             />
           </div>
-
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={labelClass}>Monto</label>
-              <MontoInput
-                value={form.monto_original}
-                onChange={n => set('monto_original', n ?? 0)}
-                className={fieldClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Moneda</label>
-              <select value={form.moneda} onChange={e => set('moneda', e.target.value)} className={cn(fieldClass, 'w-24 cursor-pointer')}>
-                <option value="ARS">ARS</option>
-                <option value="USD">USD</option>
-              </select>
-            </div>
+          <div>
+            <label className={labelClass}>Moneda</label>
+            <select value={form.moneda} onChange={e => set('moneda', e.target.value)} className={cn(fieldClass, 'w-24 cursor-pointer')}>
+              <option value="ARS">ARS</option>
+              <option value="USD">USD</option>
+            </select>
           </div>
+        </div>
 
-          <div className="flex gap-3 flex-wrap">
+        <div className="flex gap-3 flex-wrap">
+          <div className="flex-1 min-w-[120px]">
+            <label className={labelClass}>Frecuencia</label>
+            <select value={form.frecuencia} onChange={e => set('frecuencia', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
+              {FRECUENCIA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {form.frecuencia === 'anual' && (
             <div className="flex-1 min-w-[120px]">
-              <label className={labelClass}>Frecuencia</label>
-              <select value={form.frecuencia} onChange={e => set('frecuencia', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
-                {FRECUENCIA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <label className={labelClass}>Mes</label>
+              <select value={form.mes_del_anio} onChange={e => set('mes_del_anio', parseInt(e.target.value))} className={cn(fieldClass, 'cursor-pointer')}>
+                {MONTH_NAMES_CAP.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
               </select>
             </div>
-            {form.frecuencia === 'anual' && (
-              <div className="flex-1 min-w-[120px]">
-                <label className={labelClass}>Mes</label>
-                <select value={form.mes_del_anio} onChange={e => set('mes_del_anio', parseInt(e.target.value))} className={cn(fieldClass, 'cursor-pointer')}>
-                  {MONTH_NAMES_CAP.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                </select>
-              </div>
-            )}
-            {!usaSinDia && (
-              <div>
-                <label className={labelClass}>{form.frecuencia === 'semanal' ? 'Día' : 'Día del mes'}</label>
-                <input
-                  type="number" min={1} max={31} value={form.dia_del_mes ?? 1}
-                  onChange={e => set('dia_del_mes', parseInt(e.target.value) || 1)}
-                  className={cn(fieldClass, 'w-20')}
-                />
-              </div>
-            )}
-          </div>
-
-          {(form.frecuencia === 'mensual' || form.frecuencia === 'anual') && (
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={sinDia}
-                onChange={e => {
-                  setSinDia(e.target.checked)
-                  if (!e.target.checked && form.dia_del_mes == null) set('dia_del_mes', 1)
-                }}
-                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
-              />
-              <div>
-                <p className="text-sm font-medium text-foreground">Sin día fijo de vencimiento</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {form.frecuencia === 'anual'
-                    ? 'Se paga en cualquier momento de ese mes (no va al calendario)'
-                    : 'Se paga/debita en cualquier momento del mes (no va al calendario)'}
-                </p>
-              </div>
-            </label>
           )}
+          {!usaSinDia && (
+            <div>
+              <label className={labelClass}>{form.frecuencia === 'semanal' ? 'Día' : 'Día del mes'}</label>
+              <input
+                type="number" min={1} max={31} value={form.dia_del_mes ?? 1}
+                onChange={e => set('dia_del_mes', parseInt(e.target.value) || 1)}
+                className={cn(fieldClass, 'w-20')}
+              />
+            </div>
+          )}
+        </div>
 
-          <div>
-            <label className={labelClass}>Categoría</label>
-            <select value={form.categoria} onChange={e => set('categoria', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
-              <option value="">Sin categoría</option>
-              {categorias.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className={labelClass}>Medio de pago</label>
-            <select value={form.medio_pago} onChange={e => set('medio_pago', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
-              {MEDIO_PAGO_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </div>
-
-          <label className="flex items-start gap-3 cursor-pointer group">
+        {(form.frecuencia === 'mensual' || form.frecuencia === 'anual') && (
+          <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
-              checked={form.no_materializar}
-              onChange={e => setForm(prev => ({ ...prev, no_materializar: e.target.checked }))}
+              checked={sinDia}
+              onChange={e => {
+                setSinDia(e.target.checked)
+                if (!e.target.checked && form.dia_del_mes == null) set('dia_del_mes', 1)
+              }}
               className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
             />
             <div>
-              <p className="text-sm font-medium text-foreground">Se debita automáticamente de tarjeta</p>
-              <p className="text-xs text-muted-foreground mt-0.5">No materializar — el gasto se registra solo vía email</p>
+              <p className="text-sm font-medium text-foreground">Sin día fijo de vencimiento</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {form.frecuencia === 'anual'
+                  ? 'Se paga en cualquier momento de ese mes (no va al calendario)'
+                  : 'Se paga/debita en cualquier momento del mes (no va al calendario)'}
+              </p>
             </div>
           </label>
+        )}
 
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
-          )}
+        <div>
+          <label className={labelClass}>Categoría</label>
+          <select value={form.categoria} onChange={e => set('categoria', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
+            <option value="">Sin categoría</option>
+            {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-border gap-3">
-          {isEdit ? (
-            <>
-              {confirmDeactivate ? (
-                <>
-                  <span className="text-sm text-muted-foreground">
-                    ¿{recurrente!.activo ? 'Desactivar' : 'Activar'} "{recurrente!.descripcion}"?
-                  </span>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setConfirmDeactivate(false)}>Cancelar</Button>
-                    <Button
-                      size="sm"
-                      variant={recurrente!.activo ? 'destructive' : 'default'}
-                      onClick={handleToggle}
-                      disabled={isPending}
-                    >
-                      {isPending ? '...' : recurrente!.activo ? 'Desactivar' : 'Activar'}
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={() => setConfirmDeactivate(true)}
-                    className={recurrente!.activo ? 'text-muted-foreground hover:text-destructive' : 'text-success hover:text-success/80'}
-                  >
-                    {recurrente!.activo ? 'Desactivar' : 'Activar'}
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-                    <ShimmerButton onClick={handleSave} disabled={isPending} shimmerDuration="2s" borderRadius="6px" className="h-8 px-3 text-xs">
-                      {isPending ? 'Guardando...' : 'Guardar'}
-                    </ShimmerButton>
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <div />
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-                <ShimmerButton onClick={handleSave} disabled={isPending} shimmerDuration="2s" borderRadius="6px" className="h-8 px-3 text-xs">
-                  {isPending ? 'Guardando...' : 'Agregar'}
-                </ShimmerButton>
-              </div>
-            </>
-          )}
+        <div>
+          <label className={labelClass}>Medio de pago</label>
+          <select value={form.medio_pago} onChange={e => set('medio_pago', e.target.value)} className={cn(fieldClass, 'cursor-pointer')}>
+            {MEDIO_PAGO_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
         </div>
+
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={form.no_materializar}
+            onChange={e => setForm(prev => ({ ...prev, no_materializar: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+          />
+          <div>
+            <p className="text-sm font-medium text-foreground">Se debita automáticamente de tarjeta</p>
+            <p className="text-xs text-muted-foreground mt-0.5">No materializar — el gasto se registra solo vía email</p>
+          </div>
+        </label>
+
+        {error && (
+          <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
+        )}
       </div>
-    </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between px-6 py-4 border-t border-border gap-3">
+        {isEdit ? (
+          <>
+            {confirmDeactivate ? (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  ¿{recurrente!.activo ? 'Desactivar' : 'Activar'} "{recurrente!.descripcion}"?
+                </span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setConfirmDeactivate(false)}>Cancelar</Button>
+                  <Button
+                    size="sm"
+                    variant={recurrente!.activo ? 'destructive' : 'default'}
+                    onClick={handleToggle}
+                    disabled={isPending}
+                  >
+                    {isPending ? '...' : recurrente!.activo ? 'Desactivar' : 'Activar'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost" size="sm"
+                  onClick={() => setConfirmDeactivate(true)}
+                  className={recurrente!.activo ? 'text-muted-foreground hover:text-destructive' : 'text-success hover:text-success/80'}
+                >
+                  {recurrente!.activo ? 'Desactivar' : 'Activar'}
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+                  <ShimmerButton onClick={handleSave} disabled={isPending} shimmerDuration="2s" borderRadius="6px" className="h-8 px-3 text-xs">
+                    {isPending ? 'Guardando...' : 'Guardar'}
+                  </ShimmerButton>
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <div />
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+              <ShimmerButton onClick={handleSave} disabled={isPending} shimmerDuration="2s" borderRadius="6px" className="h-8 px-3 text-xs">
+                {isPending ? 'Guardando...' : 'Agregar'}
+              </ShimmerButton>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }

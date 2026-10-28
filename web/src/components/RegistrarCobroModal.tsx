@@ -10,6 +10,7 @@ import { ShimmerButton } from '@/components/magicui/shimmer-button'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import MontoInput from '@/components/ui/MontoInput'
+import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 interface Props {
   recurrente: RecurrenteConCosto
@@ -81,96 +82,91 @@ export default function RegistrarCobroModal({ recurrente: r, fechaDefault, mesOb
   )
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-card text-card-foreground rounded-2xl rounded-t-3xl sm:rounded-2xl shadow-modal border border-border w-full max-w-md flex flex-col animate-slide-up sm:animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold">
-              Registrar cobro
-              {mesObjetivoLabel && <span className="text-primary font-medium"> · {mesObjetivoLabel}</span>}
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{r.descripcion}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
-          >
-            <X className="w-4 h-4" />
-          </button>
+    <Modal onClose={onClose} className="max-w-md">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div>
+          <ModalTitle>
+            Registrar cobro
+            {mesObjetivoLabel && <span className="text-primary font-medium"> · {mesObjetivoLabel}</span>}
+          </ModalTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">{r.descripcion}</p>
         </div>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        <div className="px-6 py-4 space-y-4">
-          {/* Monto + Fecha */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={labelClass}>
-                Monto{r.moneda !== 'ARS' && <span className="text-primary ml-1">{r.moneda}</span>}
-              </label>
-              <MontoInput
-                value={monto}
-                onChange={n => setMonto(n === null ? '' : String(n))}
-                className={fieldClass}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Fecha</label>
-              <input
-                type="date"
-                value={fecha}
-                onChange={e => setFecha(e.target.value)}
-                className={cn(fieldClass, 'w-40')}
-              />
-            </div>
-          </div>
-
-          {/* Documentos — opcional, varios y con tipo por archivo */}
-          <div>
+      <div className="px-6 py-4 space-y-4">
+        {/* Monto + Fecha */}
+        <div className="flex gap-3">
+          <div className="flex-1">
             <label className={labelClass}>
-              Documentos <span className="text-muted-foreground/60 font-normal">(opcional)</span>
+              Monto{r.moneda !== 'ARS' && <span className="text-primary ml-1">{r.moneda}</span>}
             </label>
-            <SelectorArchivos
-              archivos={archivos}
-              onChange={setArchivos}
-              fecha={fecha}
-              comercio={r.descripcion}
-              opcional
-              disabled={isPending}
+            <MontoInput
+              value={monto}
+              onChange={n => setMonto(n === null ? '' : String(n))}
+              className={fieldClass}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Fecha</label>
+            <input
+              type="date"
+              value={fecha}
+              onChange={e => setFecha(e.target.value)}
+              className={cn(fieldClass, 'w-40')}
             />
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
-            Cancelar
-          </Button>
-          {done ? (
-            <div className="flex items-center gap-1.5 text-sm font-medium text-success px-3 py-1.5">
-              <Check className="w-4 h-4" />
-              Registrado
-            </div>
-          ) : (
-            <ShimmerButton
-              onClick={handleSubmit}
-              disabled={isPending || !fecha || !monto}
-              shimmerDuration="2s"
-              borderRadius="6px"
-              className="h-8 px-4 text-xs"
-            >
-              {isPending
-                ? 'Registrando...'
-                : archivos.length > 0
-                ? `Registrar con ${archivos.length} doc.`
-                : 'Registrar cobro'}
-            </ShimmerButton>
-          )}
+        {/* Documentos — opcional, varios y con tipo por archivo */}
+        <div>
+          <label className={labelClass}>
+            Documentos <span className="text-muted-foreground/60 font-normal">(opcional)</span>
+          </label>
+          <SelectorArchivos
+            archivos={archivos}
+            onChange={setArchivos}
+            fecha={fecha}
+            comercio={r.descripcion}
+            opcional
+            disabled={isPending}
+          />
         </div>
       </div>
-    </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border">
+        <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
+          Cancelar
+        </Button>
+        {done ? (
+          <div className="flex items-center gap-1.5 text-sm font-medium text-success px-3 py-1.5">
+            <Check className="w-4 h-4" />
+            Registrado
+          </div>
+        ) : (
+          <ShimmerButton
+            onClick={handleSubmit}
+            disabled={isPending || !fecha || !monto}
+            shimmerDuration="2s"
+            borderRadius="6px"
+            className="h-8 px-4 text-xs"
+          >
+            {isPending
+              ? 'Registrando...'
+              : archivos.length > 0
+              ? `Registrar con ${archivos.length} doc.`
+              : 'Registrar cobro'}
+          </ShimmerButton>
+        )}
+      </div>
+    </Modal>
   )
 }

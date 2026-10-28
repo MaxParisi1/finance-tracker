@@ -156,6 +156,29 @@ def test_texto_vacio_falla_claro():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("pdf, slug", [
+    ("aysa_depto_2026-11.pdf", "aysa"),
+    ("aysa_baulera_2026-11.pdf", "aysa_baulera"),
+])
+def test_con_la_baulera_registrada_cada_pdf_de_aysa_va_a_su_servicio(pdf, slug):
+    """
+    Con los PDFs reales de octubre de 2026: la baulera (cuenta 1932903) es un
+    servicio aparte del depto (1929557). Ninguna cuenta aparece en el PDF de la
+    otra, así que un PDF mandado por Telegram se rutea sin ambigüedad.
+    """
+    from pathlib import Path
+
+    from bot.tools.documentos import extraer_texto_pdf
+
+    ruta = Path(__file__).parent / "fixtures" / "facturas" / pdf
+    if not ruta.exists():
+        pytest.skip(f"falta el fixture {pdf}")
+    con_baulera = IDENTIFICADORES + [_ident("aysa_baulera", "cuenta", "1932903")]
+    texto = extraer_texto_pdf(ruta.read_bytes())
+    assert identificar_servicio(texto, con_baulera)["servicio"]["slug"] == slug
+
+
+@pytest.mark.unit
 def test_si_coinciden_dos_servicios_pregunta_en_vez_de_elegir():
     """Archivar bajo el servicio equivocado es peor que molestar al usuario."""
     mezcla = "Cuenta 5255064586 y tambien cliente 40000507673"

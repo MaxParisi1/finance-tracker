@@ -7,8 +7,11 @@ factura se pierde en silencio, que es el modo de falla más caro de todos.
 """
 
 import asyncio
+import email as email_lib
 from dataclasses import replace
 from datetime import date
+from email import policy
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -30,6 +33,13 @@ MAIL = {"id": "msg-1", "from": "Edenor <facturadigital@edenor.com>",
 
 PARSEADA = FacturaParseada(servicio="edenor", identificador="5255064586",
                            monto=13405.84, vencimiento=date(2026, 8, 5))
+
+SERVICIO = {"id": "srv-edenor", "slug": "edenor", "nombre": "Edenor"}
+
+
+def resultado(ya_existia=False, factura_id="fac-1", servicio=SERVICIO):
+    return ResultadoRegistro(factura={"id": factura_id}, ya_existia=ya_existia,
+                             servicio=servicio)
 
 
 class BotFalso:
@@ -53,13 +63,13 @@ def correr(coro):
 
 def _patches(parsear=None, registrar=None, marcar=None):
     return [
-        patch("bot.facturas_poller.parsear_email",
+        patch("bot.facturas_poller.parsear_facturas",
               **({"side_effect": parsear} if isinstance(parsear, Exception)
-                 else {"return_value": parsear or PARSEADA})),
+                 else {"return_value": parsear if isinstance(parsear, tuple)
+                       else (parsear or PARSEADA,)})),
         patch("bot.facturas_poller.registrar_factura",
-              **({"side_effect": registrar} if isinstance(registrar, Exception)
-                 else {"return_value": registrar or ResultadoRegistro(
-                     factura={"id": "fac-1"}, ya_existia=False)})),
+              **({"side_effect": registrar} if isinstance(registrar, (Exception, list))
+                 else {"return_value": registrar or resultado()})),
         patch("bot.facturas_poller.mark_as_read",
               **({"side_effect": marcar} if isinstance(marcar, Exception) else {})),
     ]
@@ -97,7 +107,7 @@ def test_factura_nueva_se_registra_marca_leido_y_notifica():
 @pytest.mark.unit
 def test_factura_ya_registrada_marca_leido_sin_notificar_de_nuevo():
     bot = BotFalso()
-    ya = ResultadoRegistro(factura={"id": "fac-1"}, ya_existia=True)
+    ya = resultado(ya_existia=True)
     with Ctx(registrar=ya) as ctx:
         assert correr(procesar_email_factura(bot, 1, MAIL)) is True
 
@@ -341,15 +351,15 @@ def test_fallback_rutea_por_numero_de_cuenta_cuando_el_remitente_es_desconocido(
     ident = {"tipo": "cuenta", "valor": "5255064586",
              "servicio": {"id": "s", "slug": "edenor", "activo": True}}
 
-    with patch("bot.facturas_poller.parsear_email") as parsear, \
+    with patch("bot.facturas_poller.parsear_facturas") as parsear, \
          patch("bot.tools.documentos.identificar_servicio", return_value=ident), \
          patch("bot.facturas_poller.queries.listar_identificadores_servicios",
                return_value=[ident]):
         parsear.side_effect = [
             FacturaNoParseable("remitente no registrado: 'yo@gmail.com'"),
-            PARSEADA,
+            (PARSEADA,),
         ]
-        assert parsear_con_fallback(email) is PARSEADA
+        assert parsear_con_fallback(email) == (PARSEADA,)
 
     assert parsear.call_args.kwargs["slug"] == "edenor"
 
@@ -357,7 +367,7 @@ def test_fallback_rutea_por_numero_de_cuenta_cuando_el_remitente_es_desconocido(
 @pytest.mark.unit
 def test_el_fallback_no_se_usa_si_el_fallo_fue_de_formato():
     """Un template cambiado tiene que romper, no reintentar por otra vía."""
-    with patch("bot.facturas_poller.parsear_email",
+    with patch("bot.facturas_poller.parsear_facturas",
                side_effect=FacturaNoParseable("no encontré total a pagar")):
         with pytest.raises(FacturaNoParseable, match="total a pagar"):
             parsear_con_fallback({"from": "x@edenor.com", "texto": "..."})
@@ -366,7 +376,7 @@ def test_el_fallback_no_se_usa_si_el_fallo_fue_de_formato():
 @pytest.mark.unit
 def test_si_el_fallback_tampoco_identifica_se_propaga_el_error_original():
     ident_vacio = []
-    with patch("bot.facturas_poller.parsear_email",
+    with patch("bot.facturas_poller.parsear_facturas",
                side_effect=FacturaNoParseable("remitente no registrado: 'x'")), \
          patch("bot.facturas_poller.queries.listar_identificadores_servicios",
                return_value=ident_vacio):
@@ -470,7 +480,7 @@ def test_una_factura_sin_link_no_intenta_descargar_nada():
 def test_una_factura_ya_registrada_no_vuelve_a_archivar_el_pdf():
     """Evita un duplicado en Drive si el mail se reprocesa."""
     bot = BotFalso()
-    ya = ResultadoRegistro(factura={"id": "fac-1"}, ya_existia=True)
+    ya = resultado(ya_existia=True)
     with Ctx(parsear=PERSONAL, registrar=ya):
         with patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
             assert correr(procesar_email_factura(bot, 1, MAIL)) is True
@@ -508,7 +518,7 @@ def test_cada_servicio_va_por_su_flujo_de_descarga():
         assert pdf_de_factura(AYSA) == b"%PDF"
 
     personal.assert_not_called()
-    aysa.assert_called_once_with(AYSA.pdf_urls[0], "0111B20261385", 30562.17)
+    aysa.assert_called_once_with(AYSA.pdf_urls, "0111B20261385", 30562.17)
 
 
 @pytest.mark.unit
@@ -527,7 +537,7 @@ def test_cualquier_error_de_descarga_de_aysa_sale_como_pdf_no_disponible():
     with patch("bot.facturas_poller.descargar_pdf", side_effect=OSError("DNS")):
         with patch("bot.tools.aysa_pdf.resolver_url_pdf", return_value="https://x/y.pdf"):
             with pytest.raises(AysaPdfNoDisponible, match="falló la descarga"):
-                descargar_factura_aysa(AYSA.pdf_urls[0], AYSA.nro_factura, AYSA.monto)
+                descargar_factura_aysa(AYSA.pdf_urls, AYSA.nro_factura, AYSA.monto)
 
 
 @pytest.mark.unit
@@ -540,7 +550,7 @@ def test_un_pdf_que_no_es_de_esta_factura_no_se_archiva():
          patch("bot.tools.aysa_pdf.resolver_url_pdf", return_value="https://x/y.pdf"), \
          patch("bot.tools.aysa_pdf.texto_primera_pagina", return_value="LSP 0111B99999999"):
         with pytest.raises(AysaPdfNoDisponible, match="otra factura"):
-            descargar_factura_aysa(AYSA.pdf_urls[0], AYSA.nro_factura, AYSA.monto)
+            descargar_factura_aysa(AYSA.pdf_urls, AYSA.nro_factura, AYSA.monto)
 
 
 # ──────────────────────────────────────────────
@@ -671,3 +681,141 @@ def test_un_mail_de_expensas_termina_con_el_pdf_colgado_de_la_factura():
     assert archivar.call_args[0][1] == {"id": "fac-1"}
     ctx.marcar.assert_called_once_with("msg-1")
     assert "PDF archivado" in bot.mensajes[0]["text"]
+
+
+# ──────────────────────────────────────────────
+# AySA con dos cuentas en el mismo aviso (depto + baulera)
+# ──────────────────────────────────────────────
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+DEPTO = FacturaParseada(
+    servicio="aysa", identificador="1929557", monto=32832.59,
+    vencimiento=date(2026, 11, 12), nro_factura="0111B31630809",
+    pdf_urls=("https://t/boton-1", "https://t/boton-2"),
+)
+BAULERA = replace(DEPTO, identificador="1932903", monto=19120.69,
+                  vencimiento=date(2026, 11, 10), nro_factura="0111B31161881")
+
+SERV_AYSA = {"id": "srv-aysa", "slug": "aysa", "nombre": "AySA"}
+SERV_BAULERA = {"id": "srv-baulera", "slug": "aysa_baulera", "nombre": "AySA Baulera"}
+
+
+def _mail_real(nombre: str) -> dict:
+    """El .eml tal como lo entrega gmail_reader, para pasar por el poller entero."""
+    ruta = FIXTURES / "emails" / f"{nombre}.eml"
+    if not ruta.exists():
+        pytest.skip(f"falta el fixture {nombre}.eml")
+    msg = email_lib.message_from_bytes(ruta.read_bytes(), policy=policy.default)
+    html = next(p.get_content() for p in msg.walk() if p.get_content_type() == "text/html")
+    return {"id": "msg-aysa", "from": msg["From"], "subject": msg["Subject"],
+            "body": "", "html": html}
+
+
+def _pdf_real(nombre: str) -> bytes:
+    ruta = FIXTURES / "facturas" / nombre
+    if not ruta.exists():
+        pytest.skip(f"falta el fixture {nombre}")
+    return ruta.read_bytes()
+
+
+@pytest.mark.unit
+def test_el_aviso_real_de_aysa_registra_el_depto_y_la_baulera():
+    """
+    Bug real: el aviso del 20/10/2026 trajo las dos cuentas y solo se registró
+    el depto; la baulera se perdió y el mail quedó leído. Ahora pasa el mail
+    real por el poller entero: cada fila se rutea por su número de cuenta, se
+    registra a su servicio y se avisa con el nombre de ese servicio.
+    """
+    por_cuenta = {"1929557": SERV_AYSA, "1932903": SERV_BAULERA}
+
+    def registrar(parseada, eid):
+        return resultado(factura_id=f"fac-{parseada.identificador}",
+                         servicio=por_cuenta[parseada.identificador])
+
+    bot = BotFalso()
+    with patch("bot.facturas_poller.registrar_factura", side_effect=registrar) as reg, \
+         patch("bot.facturas_poller.mark_as_read") as marcar, \
+         patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
+        assert correr(procesar_email_factura(bot, 1, _mail_real("aysa_dos_cuentas"))) is True
+
+    assert [c[0][0].identificador for c in reg.call_args_list] == ["1929557", "1932903"]
+    marcar.assert_called_once_with("msg-aysa")
+    # Cada PDF va a la carpeta del servicio al que se ruteó, no a la de "aysa".
+    assert [c[0][2]["slug"] for c in archivar.call_args_list] == ["aysa", "aysa_baulera"]
+    textos = [m["text"] for m in bot.mensajes]
+    assert len(textos) == 2
+    assert "$32.832,59" in textos[0] and "*AySA*" in textos[0]
+    assert "$19.120,69" in textos[1] and "AySA Baulera" in textos[1]
+
+
+@pytest.mark.unit
+def test_si_una_de_las_facturas_falla_el_mail_queda_sin_leer():
+    """
+    La que entró sigue su curso (PDF y aviso) y la que falló avisa. El mail se
+    reintenta, y el registro idempotente por mail y servicio no duplica la que
+    ya está.
+    """
+    bot = BotFalso()
+    fallo = ServicioDesconocido("el identificador '1932903' no está registrado")
+    with Ctx(parsear=(DEPTO, BAULERA),
+             registrar=[resultado(servicio=SERV_AYSA), fallo]) as ctx, \
+         patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
+        assert correr(procesar_email_factura(bot, 1, MAIL)) is False
+
+    ctx.marcar.assert_not_called()
+    archivar.assert_called_once()
+    textos = " ".join(m["text"] for m in bot.mensajes)
+    assert "1932903" in textos            # la alerta dice qué cuenta falló
+    assert "$32.832,59" in textos         # y la que entró se avisa igual
+
+
+@pytest.mark.unit
+def test_el_reintento_solo_registra_la_que_faltaba():
+    """
+    Recuperar la baulera de octubre es marcar el mail como no leído: el depto
+    ya está (no se vuelve a archivar ni a avisar) y entra solo la baulera.
+    """
+    bot = BotFalso()
+    with Ctx(parsear=(DEPTO, BAULERA),
+             registrar=[resultado(ya_existia=True, servicio=SERV_AYSA),
+                        resultado(servicio=SERV_BAULERA)]) as ctx, \
+         patch("bot.facturas_poller.archivar_pdf_de_factura") as archivar:
+        assert correr(procesar_email_factura(bot, 1, MAIL)) is True
+
+    ctx.marcar.assert_called_once_with("msg-1")
+    archivar.assert_called_once()
+    assert archivar.call_args[0][2] is SERV_BAULERA
+    assert len(bot.mensajes) == 1
+    assert "AySA Baulera" in bot.mensajes[0]["text"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("orden", ["depto primero", "baulera primero"])
+def test_cada_factura_se_queda_con_su_pdf_sin_importar_el_orden(orden):
+    """
+    Con los PDFs reales de octubre: el de la baulera menciona solo su LSP y su
+    total, así que la verificación por contenido lo separa del del depto aunque
+    los botones vengan en cualquier orden.
+    """
+    pdfs = {"https://t/depto": _pdf_real("aysa_depto_2026-11.pdf"),
+            "https://t/baulera": _pdf_real("aysa_baulera_2026-11.pdf")}
+    urls = tuple(pdfs) if orden == "depto primero" else tuple(reversed(pdfs))
+
+    with patch("bot.tools.aysa_pdf.resolver_url_pdf", side_effect=lambda u: u), \
+         patch("bot.facturas_poller.descargar_pdf", side_effect=pdfs.__getitem__):
+        assert descargar_factura_aysa(urls, DEPTO.nro_factura, DEPTO.monto) \
+            == pdfs["https://t/depto"]
+        assert descargar_factura_aysa(urls, BAULERA.nro_factura, BAULERA.monto) \
+            == pdfs["https://t/baulera"]
+
+
+@pytest.mark.unit
+def test_si_ningun_pdf_es_el_de_la_factura_no_se_archiva_y_dice_por_que():
+    from bot.tools.aysa_pdf import AysaPdfNoDisponible
+
+    with patch("bot.tools.aysa_pdf.resolver_url_pdf", side_effect=lambda u: u), \
+         patch("bot.facturas_poller.descargar_pdf", return_value=b"%PDF"), \
+         patch("bot.tools.aysa_pdf.texto_primera_pagina", return_value="LSP 0111B99999999"):
+        with pytest.raises(AysaPdfNoDisponible, match="ninguno de los 2 PDFs"):
+            descargar_factura_aysa(DEPTO.pdf_urls, DEPTO.nro_factura, DEPTO.monto)

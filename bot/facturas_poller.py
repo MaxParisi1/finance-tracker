@@ -24,7 +24,7 @@ from bot.tools.alertas import alertar_error, escapar_md
 from bot.tools.expensas_pdf import ExpensasNoParseable, parsear_pdf_unidades
 from bot.tools.facturas import (
     FacturaIncompleta, FacturaIrrelevante, FacturaNoParseable, FacturaParseada,
-    parsear_email,
+    parsear_facturas,
 )
 from bot.tools.facturas_service import (
     FacturaSospechosa, ServicioDesconocido, registrar_factura,
@@ -87,13 +87,13 @@ def _slug_por_identificador(texto: str) -> str | None:
     return ident["servicio"]["slug"]
 
 
-def parsear_con_fallback(email_parseable: dict):
+def parsear_con_fallback(email_parseable: dict) -> tuple[FacturaParseada, ...]:
     """
     Parsea por remitente y, si no se reconoce, reintenta identificando el
     servicio por el número de cuenta que aparece en el cuerpo.
     """
     try:
-        return parsear_email(email_parseable)
+        return parsear_facturas(email_parseable)
     except FacturaNoParseable as exc:
         if "remitente no registrado" not in str(exc):
             raise
@@ -101,7 +101,7 @@ def parsear_con_fallback(email_parseable: dict):
         if slug is None:
             raise
         logger.info("Remitente desconocido; ruteado por identificador → %s", slug)
-        return parsear_email(email_parseable, slug=slug)
+        return parsear_facturas(email_parseable, slug=slug)
 
 
 def descargar_pdf(url: str, headers: dict | None = None) -> bytes:
@@ -196,25 +196,42 @@ def descargar_factura_personal(url: str, monto: float) -> bytes:
     return pdf
 
 
-def descargar_factura_aysa(url: str, nro_factura: str | None, monto: float) -> bytes:
+def descargar_factura_aysa(urls: tuple[str, ...], nro_factura: str | None,
+                           monto: float) -> bytes:
     """
     La cadena de redirecciones de AySA más la verificación de que el PDF sea el
     de esta factura. Cualquier fallo sale como AysaPdfNoDisponible para que el
     caller no tenga que distinguir en cuál de los pasos se rompió.
+
+    Un mail con varias cuentas trae un botón por factura. Se prueban todos y se
+    queda el que pasa la verificación (N° de factura y total): el emparejamiento
+    es por CONTENIDO, como en resolver_expensas, así que el orden de los botones
+    no puede colgar el PDF de la baulera en la factura del depto.
     """
     from bot.tools.aysa_pdf import (
         AysaPdfNoDisponible, resolver_url_pdf, verificar_factura,
     )
 
-    try:
-        pdf = descargar_pdf(resolver_url_pdf(url))
-    except AysaPdfNoDisponible:
-        raise
-    except Exception as exc:
-        raise AysaPdfNoDisponible(f"falló la descarga: {exc}") from exc
+    errores: list[AysaPdfNoDisponible] = []
+    for url in urls:
+        try:
+            try:
+                pdf = descargar_pdf(resolver_url_pdf(url))
+            except AysaPdfNoDisponible:
+                raise
+            except Exception as exc:
+                raise AysaPdfNoDisponible(f"falló la descarga: {exc}") from exc
+            verificar_factura(pdf, nro_factura, monto)
+            return pdf
+        except AysaPdfNoDisponible as exc:
+            errores.append(exc)
 
-    verificar_factura(pdf, nro_factura, monto)
-    return pdf
+    if len(errores) == 1:
+        raise errores[0]
+    raise AysaPdfNoDisponible(
+        f"ninguno de los {len(urls)} PDFs es el de la factura {nro_factura}: "
+        + "; ".join(str(e) for e in errores)
+    )
 
 
 def descargar_factura_edenor(url: str, identificador: str, monto: float) -> bytes:
@@ -283,7 +300,7 @@ def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     if parseada.servicio == "personal":
         return descargar_factura_personal(parseada.pdf_urls[0], parseada.monto)
     if parseada.servicio == "aysa":
-        return descargar_factura_aysa(parseada.pdf_urls[0], parseada.nro_factura,
+        return descargar_factura_aysa(parseada.pdf_urls, parseada.nro_factura,
                                       parseada.monto)
     if parseada.servicio == "edenor":
         return descargar_factura_edenor(parseada.pdf_urls[0], parseada.identificador,
@@ -296,18 +313,18 @@ def pdf_de_factura(parseada: FacturaParseada) -> bytes:
     )
 
 
-def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict) -> dict:
+def archivar_pdf_de_factura(parseada: FacturaParseada, factura: dict,
+                            servicio: dict) -> dict:
     """
     Baja el PDF que enlaza el mail y lo cuelga de la factura recién registrada,
     con la misma estructura de carpetas que usa el archivado por Telegram.
 
-    Qué servicio se puede bajar solo lo decide pdf_de_factura().
+    Qué flujo de descarga usar lo decide pdf_de_factura() por el slug del
+    parser; la carpeta, en cambio, sale de `servicio`, el que resolvió el ruteo.
+    No son lo mismo: el mail de AySA lo lee un solo parser, pero la baulera es
+    un servicio aparte y su PDF va a su propia carpeta.
     """
     from bot.tools.archivado import subir_a_drive
-
-    servicio = queries.obtener_servicio_por_slug(parseada.servicio)
-    if servicio is None:
-        raise ServicioDesconocido(f"el servicio {parseada.servicio!r} no está registrado")
 
     pdf = pdf_de_factura(parseada)
     subido = subir_a_drive(pdf, "application/pdf", servicio["nombre"],
@@ -364,9 +381,69 @@ def _resumen(factura: FacturaParseada, nombre: str, archivada: bool = False) -> 
     return "\n".join(lineas)
 
 
+async def _registrar(bot, chat_id: int, eid: str, contexto: dict,
+                     parseada: FacturaParseada):
+    """
+    Registra una de las facturas del mail. Devuelve el ResultadoRegistro, o None
+    si no se pudo (y ya avisó con lo que se leyó, para poder diagnosticar).
+    """
+    # La clave de deduplicación lleva la cuenta: si fallan dos facturas del
+    # mismo mail, llegan los dos avisos y no uno solo.
+    sufijo = f"{eid}:{parseada.identificador}" if parseada.identificador else eid
+    try:
+        return await asyncio.to_thread(registrar_factura, parseada, eid)
+    except (ServicioDesconocido, FacturaSospechosa) as exc:
+        await alertar_error(
+            bot, chat_id, titulo="Factura no registrada",
+            contexto={**contexto, "Servicio": parseada.servicio,
+                      "Cuenta": parseada.identificador or "—",
+                      "Monto leído": f"${formatear_monto_ar(parseada.monto)}",
+                      "Vencimiento leído": parseada.vencimiento},
+            exc=exc, clave=f"registro:{sufijo}",
+        )
+    except Exception as exc:
+        await alertar_error(
+            bot, chat_id, titulo="Error guardando una factura",
+            contexto={**contexto, "Servicio": parseada.servicio},
+            exc=exc, clave=f"guardar:{sufijo}",
+        )
+    return None
+
+
+async def _archivar_y_notificar(bot, chat_id: int, parseada: FacturaParseada,
+                                resultado) -> None:
+    """Lo que sigue a una factura recién registrada: su PDF y el resumen."""
+    # El PDF es opcional: la factura ya está guardada, así que un fallo acá se
+    # avisa pero NO deja el mail sin leer. Si lo reintentáramos, un flujo de
+    # descarga roto alertaría en cada ciclo para siempre; el repaso de los lunes
+    # ya reclama la documentación faltante, que es la cadencia correcta.
+    archivada = False
+    if parseada.pdf_urls:
+        try:
+            await asyncio.to_thread(archivar_pdf_de_factura, parseada,
+                                    resultado.factura, resultado.servicio)
+            archivada = True
+        except Exception as exc:
+            logger.warning("No pude archivar el PDF de %s: %s", parseada.servicio, exc)
+            await _avisar_pdf_no_archivado(bot, chat_id, parseada, exc)
+
+    nombre = resultado.servicio.get("nombre") or parseada.servicio
+    try:
+        await bot.send_message(chat_id=chat_id, text=_resumen(parseada, nombre, archivada),
+                               parse_mode="Markdown")
+    except Exception:
+        # La factura ya está guardada: no avisar es molesto, no grave.
+        logger.exception("No pude notificar la factura registrada")
+
+
 async def procesar_email_factura(bot, chat_id: int, email: dict) -> bool:
     """
     Procesa un mail. Devuelve True si quedó resuelto (y se marcó leído).
+
+    Un mail puede traer varias facturas (AySA manda todas las cuentas del
+    titular en un mismo aviso). Se marca leído solo si se registraron TODAS; si
+    alguna falla, las que sí entraron siguen su curso y el reintento no las
+    duplica, porque el registro es idempotente por mail y servicio.
 
     Cada rama de error avisa con el detalle exacto de qué se rompió y deja el
     mail sin leer para reintentar.
@@ -375,12 +452,12 @@ async def procesar_email_factura(bot, chat_id: int, email: dict) -> bool:
     contexto = {"Asunto": email.get("subject"), "De": email.get("from")}
 
     try:
-        parseada = await asyncio.to_thread(parsear_con_fallback, _como_email_parseable(email))
+        facturas = await asyncio.to_thread(parsear_con_fallback, _como_email_parseable(email))
 
     except FacturaIncompleta as incompleta:
         # Expensas: los datos están en un PDF enlazado.
         try:
-            parseada = await asyncio.to_thread(resolver_expensas, incompleta.pdf_urls)
+            facturas = (await asyncio.to_thread(resolver_expensas, incompleta.pdf_urls),)
         except Exception as exc:
             await alertar_error(
                 bot, chat_id, titulo="No pude leer el PDF de expensas",
@@ -409,54 +486,23 @@ async def procesar_email_factura(bot, chat_id: int, email: dict) -> bool:
         )
         return False
 
-    try:
-        resultado = await asyncio.to_thread(registrar_factura, parseada, eid)
-    except (ServicioDesconocido, FacturaSospechosa) as exc:
-        await alertar_error(
-            bot, chat_id, titulo="Factura no registrada",
-            contexto={**contexto, "Servicio": parseada.servicio,
-                      "Monto leído": f"${formatear_monto_ar(parseada.monto)}",
-                      "Vencimiento leído": parseada.vencimiento},
-            exc=exc, clave=f"registro:{eid}",
-        )
-        return False
-    except Exception as exc:
-        await alertar_error(
-            bot, chat_id, titulo="Error guardando una factura",
-            contexto={**contexto, "Servicio": parseada.servicio},
-            exc=exc, clave=f"guardar:{eid}",
-        )
-        return False
+    registradas = []
+    for parseada in facturas:
+        resultado = await _registrar(bot, chat_id, eid, contexto, parseada)
+        if resultado is not None:
+            registradas.append((parseada, resultado))
 
-    await asyncio.to_thread(mark_as_read, eid)
+    resuelto = len(registradas) == len(facturas)
+    if resuelto:
+        await asyncio.to_thread(mark_as_read, eid)
 
-    if resultado.ya_existia:
-        logger.info("Factura de %s ya estaba registrada; mail marcado leído", parseada.servicio)
-        return True
+    for parseada, resultado in registradas:
+        if resultado.ya_existia:
+            logger.info("Factura de %s ya estaba registrada", parseada.servicio)
+            continue
+        await _archivar_y_notificar(bot, chat_id, parseada, resultado)
 
-    # El PDF es opcional: la factura ya está guardada, así que un fallo acá se
-    # avisa pero NO deja el mail sin leer. Si lo reintentáramos, un flujo de
-    # descarga roto alertaría en cada ciclo para siempre; el repaso de los lunes
-    # ya reclama la documentación faltante, que es la cadencia correcta.
-    archivada = False
-    if parseada.pdf_urls:
-        try:
-            await asyncio.to_thread(archivar_pdf_de_factura, parseada, resultado.factura)
-            archivada = True
-        except Exception as exc:
-            logger.warning("No pude archivar el PDF de %s: %s", parseada.servicio, exc)
-            await _avisar_pdf_no_archivado(bot, chat_id, parseada, exc)
-
-    servicio = resultado.factura.get("servicios") or {}
-    nombre = servicio.get("nombre") or parseada.servicio
-    try:
-        await bot.send_message(chat_id=chat_id, text=_resumen(parseada, nombre, archivada),
-                               parse_mode="Markdown")
-    except Exception:
-        # La factura ya está guardada: no avisar es molesto, no grave.
-        logger.exception("No pude notificar la factura registrada")
-
-    return True
+    return resuelto
 
 
 async def poll_facturas_once(bot, chat_id: int) -> bool:

@@ -326,13 +326,18 @@ def obtener_servicio_por_identificador(identificador: str) -> dict | None:
     return {**servicio, "identificador_tipo": fila["tipo"], "identificador": fila["valor"]}
 
 
-def obtener_factura_por_email(message_id: str) -> dict | None:
-    """Factura ya creada a partir de ese mail, si existe (idempotencia del poller)."""
+def obtener_factura_por_email(message_id: str, servicio_id: str) -> dict | None:
+    """
+    Factura de ese servicio ya creada a partir de ese mail, si existe
+    (idempotencia del poller). Es por servicio porque un mismo aviso de AySA
+    trae las facturas de varias cuentas.
+    """
     client = get_client()
     res = (
         client.table("facturas")
         .select("*")
         .eq("email_message_id", message_id)
+        .eq("servicio_id", servicio_id)
         .limit(1)
         .execute()
     )

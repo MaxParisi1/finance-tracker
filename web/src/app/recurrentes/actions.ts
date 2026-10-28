@@ -11,12 +11,20 @@ import { exigirSesion } from '@/lib/auth'
 function nextDueDate(diaDelMes: number | null, frecuencia: string, mesDelAnio?: number): string {
   const hoy = ahoraAR()
 
-  if (frecuencia === 'anual') {
-    const mesIdx = (mesDelAnio ?? hoy.getMonth() + 1) - 1
-    const ultimo = new Date(hoy.getFullYear(), mesIdx + 1, 0).getDate()
-    const dia = Math.min(diaDelMes ?? ultimo, ultimo) // sin día → último día del mes (nominal)
-    let d = new Date(hoy.getFullYear(), mesIdx, dia)
-    if (d < hoy) d = new Date(hoy.getFullYear() + 1, mesIdx, dia)
+  if (frecuencia === 'anual' || frecuencia === 'semestral') {
+    // Semestral: el mes elegido y el que cae seis meses después.
+    const paso = frecuencia === 'anual' ? 12 : 6
+    const fechaEn = (mes: number) => {
+      const ultimo = new Date(hoy.getFullYear() - 1, mes + 1, 0).getDate()
+      const dia = Math.min(diaDelMes ?? ultimo, ultimo) // sin día → último día del mes (nominal)
+      return new Date(hoy.getFullYear() - 1, mes, dia)
+    }
+    let mes = (mesDelAnio ?? hoy.getMonth() + 1) - 1
+    let d = fechaEn(mes)
+    while (d < hoy) {
+      mes += paso
+      d = fechaEn(mes)
+    }
     return d.toISOString().split('T')[0]
   }
 
@@ -104,6 +112,8 @@ export async function materializarRecurrentesAction(): Promise<{
       let nuevaFecha: string
       if (r.frecuencia === 'anual') {
         nuevaFecha = addMonths(r.proximo_vencimiento, 12)
+      } else if (r.frecuencia === 'semestral') {
+        nuevaFecha = addMonths(r.proximo_vencimiento, 6)
       } else if (r.frecuencia === 'semanal') {
         const d = new Date(r.proximo_vencimiento + 'T00:00:00')
         d.setDate(d.getDate() + 7)
@@ -289,6 +299,8 @@ export async function registrarCobroAction(
   let nuevaFecha: string
   if (frecuencia === 'anual') {
     nuevaFecha = addMonths(proximo_vencimiento, 12)
+  } else if (frecuencia === 'semestral') {
+    nuevaFecha = addMonths(proximo_vencimiento, 6)
   } else if (frecuencia === 'semanal') {
     const d = new Date(proximo_vencimiento + 'T00:00:00')
     d.setDate(d.getDate() + 7)

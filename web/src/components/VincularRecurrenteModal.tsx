@@ -11,6 +11,7 @@ import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 const FRECUENCIA_LABELS: Record<string, string> = {
   mensual: 'Mensual',
+  semestral: 'Semestral',
   anual: 'Anual',
   semanal: 'Semanal',
 }

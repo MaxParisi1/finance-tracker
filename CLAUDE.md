@@ -51,8 +51,12 @@ cambiaría.
 
 Es la parte que más bugs dio; conviene tenerla clara antes de tocarla.
 
-- `servicios`: los cinco fijos (edenor, metrogas, aysa, personal,
+- `servicios`: los seis fijos (edenor, metrogas, aysa, aysa_baulera, personal,
   consorcio_gallo), cada uno atado a un `gastos_recurrentes`.
+- Un mail de aviso puede traer varias facturas (AySA manda todas las cuentas
+  del titular juntas): el parser devuelve una por fila y la idempotencia es por
+  (mail, servicio). Si la factura trae identificador, una cuenta sin registrar
+  se rechaza; el slug solo rutea lo que no trae número (expensas).
 - `facturas`: una por servicio y vencimiento. `estado` pendiente → pagada, y al
   pagarse guarda el `gasto_id` del pago. La crea el poller de mails.
 - `archivos_drive`: un PDF en Drive, con DOS vínculos opcionales e
@@ -82,6 +86,10 @@ Es la parte que más bugs dio; conviene tenerla clara antes de tocarla.
   Telegram. Además el vencimiento no se lee del PDF: sale la fecha de emisión.
   Por eso una factura tardía se ubica por importe exacto y no por fecha.
 - **Edenor**: también escribe el vencimiento pegado al texto.
+- **AySA Baulera**: cuenta aparte (1932903, U.C. 074) que llega en el mismo
+  mail que el depto. Factura semestral por adelantado, recurrente `semestral`.
+  Cada PDF se empareja con su factura por el N° de LSP, no por el orden de los
+  botones.
 - **Personal Pay**: sus comprobantes pierden los centavos al extraerse. El monto
   del gasto sale siempre de la factura, no del comprobante.
 - **Consorcio Gallo**: no tiene número de cuenta en el mail (el remitente es el

@@ -155,6 +155,12 @@ function siguienteVencimiento(fecha: string, frecuencia: string): string {
   let nm = m
   if (frecuencia === 'anual') {
     ny = y + 1
+  } else if (frecuencia === 'semestral') {
+    nm = m + 6
+    if (nm > 12) {
+      nm -= 12
+      ny = y + 1
+    }
   } else if (frecuencia === 'semanal') {
     const dt = new Date(Date.UTC(y, m - 1, d))
     dt.setUTCDate(dt.getUTCDate() + 7)

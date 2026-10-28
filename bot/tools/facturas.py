@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "FacturaParseada", "FacturaNoParseable", "FacturaIncompleta",
     "FacturaIrrelevante", "SERVICIOS",
-    "parsear_email", "servicio_de_remitente",
+    "parsear_email", "parsear_facturas", "servicio_de_remitente",
 ]
 
 
@@ -261,24 +261,47 @@ def _urls_factura_aysa(email: dict) -> tuple[str, ...]:
     return tuple(dict.fromkeys(urls))
 
 
-def _parse_aysa(email: dict) -> FacturaParseada:
+# Una fila de la tabla de AySA: cuenta, N° de factura, domicilio, localidad,
+# importe y vencimiento, una celda por línea. El tramo del medio admite hasta
+# cuatro líneas sin "$" para no atarse a cuántas celdas de domicilio haya, pero
+# no puede cruzar un importe: así una fila nunca se come el monto de la otra.
+_RE_FILA_AYSA = re.compile(
+    r"^\s*(\d{6,14})\s*\n\s*(\S+)\s*\n(?:[^\n$]*\n){0,4}?"
+    r"\s*\$\s*([\d.,]+)\s*\n\s*(\d{2}/\d{2}/\d{4})",
+    re.MULTILINE,
+)
+
+
+def _parse_aysa(email: dict) -> tuple[FacturaParseada, ...]:
+    """
+    Una factura por fila de la tabla. Bug real: en octubre de 2026 llegó un mail
+    con dos filas —el depto (cuenta 1929557) y la baulera (1932903), que AySA
+    factura aparte y por semestre— y el parser leía solo la primera. La de la
+    baulera se perdía sin aviso y el mail se marcaba leído.
+    """
     t = email["texto"]
-    # AySA arma una tabla con TODOS los encabezados primero y después los valores,
-    # así que la cuenta y el N° de factura son las dos primeras celdas tras el
-    # último encabezado ("Vencimiento").
-    valores = _buscar(
-        r"Vencimiento\s*\n\s*(\d{6,14})\s*\n\s*(\S+)", t, "cuenta y número de factura"
-    )
-    par = _buscar(_MONTO_LUEGO_FECHA, t, "importe y vencimiento")
-    return FacturaParseada(
-        servicio="aysa",
-        identificador=_norm_id(valores.group(1)),
-        monto=_monto(par.group(1)),
-        vencimiento=_fecha(par.group(2)),
-        nro_factura=valores.group(2).strip(),
-        # El PDF es un extra: si el botón no está, la factura se registra igual
-        # y el repaso de los lunes se encarga de reclamar el documento.
-        pdf_urls=_urls_factura_aysa(email),
+    # AySA arma la tabla con TODOS los encabezados primero y después los valores:
+    # las filas empiezan tras el último encabezado ("Vencimiento").
+    encabezado = _buscar(r"Vencimiento\s*\n", t, "la tabla de facturas")
+    filas = list(_RE_FILA_AYSA.finditer(t, encabezado.end()))
+    if not filas:
+        raise FacturaNoParseable("no encontré cuenta, número de factura e importe")
+
+    # Cada fila tiene su botón, pero acá no se emparejan por orden: todas las
+    # facturas llevan todos los links, y al bajar se queda el PDF que menciona
+    # su N° de factura (ver descargar_factura_aysa). El PDF es un extra: si no
+    # hay botón, la factura se registra igual y el repaso de los lunes lo reclama.
+    urls = _urls_factura_aysa(email)
+    return tuple(
+        FacturaParseada(
+            servicio="aysa",
+            identificador=_norm_id(fila.group(1)),
+            monto=_monto(fila.group(3)),
+            vencimiento=_fecha(fila.group(4)),
+            nro_factura=fila.group(2).strip(),
+            pdf_urls=urls,
+        )
+        for fila in filas
     )
 
 
@@ -406,7 +429,21 @@ _PARSERS = {
 
 def parsear_email(email: dict, slug: str | None = None) -> FacturaParseada:
     """
-    Parsea un mail de factura.
+    La factura de un mail que trae una sola. Si trae varias levanta
+    FacturaNoParseable en vez de quedarse con la primera: descartar las demás
+    es justo el fallo silencioso que hay que evitar. El poller usa
+    parsear_facturas().
+    """
+    facturas = parsear_facturas(email, slug)
+    if len(facturas) > 1:
+        raise FacturaNoParseable(f"el mail trae {len(facturas)} facturas, no una")
+    return facturas[0]
+
+
+def parsear_facturas(email: dict, slug: str | None = None) -> tuple[FacturaParseada, ...]:
+    """
+    Parsea un mail de factura. Devuelve una o más: AySA manda en un mismo aviso
+    las facturas de todas las cuentas del titular.
 
     `email` necesita: from, subject, texto (cuerpo ya convertido a texto plano) y
     opcionalmente html (para extraer links) y remitentes_alternativos.
@@ -431,9 +468,11 @@ def parsear_email(email: dict, slug: str | None = None) -> FacturaParseada:
             f"mail de {slug} sin marcadores de factura (asunto: {email.get('subject', '')[:60]!r})"
         )
 
-    factura = _PARSERS[slug](email)
-    logger.info(
-        "Factura parseada: %s · %s · $%s · vence %s",
-        factura.servicio, factura.identificador, factura.monto, factura.vencimiento,
-    )
-    return factura
+    resultado = _PARSERS[slug](email)
+    facturas = resultado if isinstance(resultado, tuple) else (resultado,)
+    for factura in facturas:
+        logger.info(
+            "Factura parseada: %s · %s · $%s · vence %s",
+            factura.servicio, factura.identificador, factura.monto, factura.vencimiento,
+        )
+    return facturas

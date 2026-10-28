@@ -3,9 +3,10 @@ Persistencia de facturas parseadas.
 
 Concentra las garantías que hacen que esto sea confiable:
 
-  - Idempotencia doble: por email_message_id y por (servicio, vencimiento).
-    Si el proceso muere entre insertar y marcar el mail como leído, el reintento
-    no duplica.
+  - Idempotencia doble: por (email_message_id, servicio) y por (servicio,
+    vencimiento). Si el proceso muere entre insertar y marcar el mail como
+    leído, el reintento no duplica. Es por servicio y no por mail a secas
+    porque un mismo aviso de AySA trae las facturas de varias cuentas.
   - Carrera contra el índice único: si dos ciclos insertan a la vez, el que
     pierde recupera la fila existente en vez de explotar.
   - Guardas de plausibilidad: un vencimiento fuera de ventana o un monto
@@ -53,6 +54,9 @@ class FacturaSospechosa(Exception):
 class ResultadoRegistro:
     factura: dict
     ya_existia: bool
+    # El servicio al que se ruteó, que no siempre es el del parser: el mail de
+    # AySA lo parsea un solo parser, pero la baulera es un servicio aparte.
+    servicio: dict
 
 
 def _validar_vencimiento(vencimiento: date, hoy: date) -> None:
@@ -111,26 +115,30 @@ def registrar_factura(
     """
     hoy = hoy or date.today()
 
-    # 1. Idempotencia por mail, antes de cualquier otra cosa.
-    if email_message_id:
-        previa = queries.obtener_factura_por_email(email_message_id)
-        if previa:
-            logger.info("Mail %s ya generó la factura %s", email_message_id, previa.get("id"))
-            return ResultadoRegistro(factura=previa, ya_existia=True)
-
-    # 2. Ruteo. Se prefiere el identificador numérico; el slug es el fallback
-    #    para expensas, cuyo mail no trae número de cuenta (ahí el remitente es
-    #    el identificador). Sin servicio resuelto no se escribe nada.
-    servicio = None
+    # 1. Ruteo. Si la factura trae identificador numérico, es la única vía: una
+    #    cuenta sin registrar se rechaza. El slug queda solo para expensas, cuyo
+    #    mail no trae número (ahí el remitente es el identificador).
+    #    Bug real: el slug se usaba también como fallback de una cuenta
+    #    desconocida, así que una factura de la baulera (cuenta 1932903, sin
+    #    registrar) se habría guardado como la AySA del depto.
     if factura.identificador:
         servicio = queries.obtener_servicio_por_identificador(factura.identificador)
-    if servicio is None:
+        if servicio is None:
+            raise ServicioDesconocido(
+                f"el identificador {factura.identificador!r} no está registrado"
+            )
+    else:
         servicio = queries.obtener_servicio_por_slug(factura.servicio)
-    if servicio is None:
-        raise ServicioDesconocido(
-            f"ni el identificador {factura.identificador!r} ni el slug "
-            f"{factura.servicio!r} están registrados"
-        )
+        if servicio is None:
+            raise ServicioDesconocido(f"el servicio {factura.servicio!r} no está registrado")
+
+    # 2. Idempotencia por mail y servicio: un mismo mail puede traer facturas de
+    #    varias cuentas, y cada una se registra por su lado.
+    if email_message_id:
+        previa = queries.obtener_factura_por_email(email_message_id, servicio["id"])
+        if previa:
+            logger.info("Mail %s ya generó la factura %s", email_message_id, previa.get("id"))
+            return ResultadoRegistro(factura=previa, ya_existia=True, servicio=servicio)
 
     # 3. Guardas de plausibilidad.
     _validar_vencimiento(factura.vencimiento, hoy)
@@ -163,6 +171,6 @@ def registrar_factura(
             "Factura de %s con vencimiento %s ya existía (id=%s)",
             servicio["slug"], fila["vencimiento"], existente.get("id"),
         )
-        return ResultadoRegistro(factura=existente, ya_existia=True)
+        return ResultadoRegistro(factura=existente, ya_existia=True, servicio=servicio)
 
-    return ResultadoRegistro(factura=creada, ya_existia=False)
+    return ResultadoRegistro(factura=creada, ya_existia=False, servicio=servicio)

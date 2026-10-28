@@ -127,13 +127,36 @@ def test_mail_ya_procesado_no_reinserta():
 
 
 @pytest.mark.unit
-def test_idempotencia_se_chequea_antes_de_resolver_el_servicio():
-    """Evita trabajo (y falsos ServicioDesconocido) sobre mails ya procesados."""
-    with _Contexto(servicio=None, por_email={"id": "fac-previa"}) as ctx:
-        res = registrar_factura(factura(), email_message_id="msg-1", hoy=HOY)
+def test_idempotencia_es_por_mail_y_servicio():
+    """
+    Bug real: el aviso de AySA de octubre de 2026 trajo dos facturas, la del
+    depto y la de la baulera. Con la idempotencia por mail a secas, la segunda
+    se habría tomado por "ya registrada" y descartado.
+    """
+    baulera = {"id": "srv-baulera", "slug": "aysa_baulera", "nombre": "AySA Baulera"}
+    depto_ya_registrada = {"id": "fac-depto", "servicio_id": "srv-aysa"}
 
-    assert res.ya_existia is True
-    ctx.servicio.assert_not_called()
+    def por_email(message_id, servicio_id):
+        return depto_ya_registrada if servicio_id == "srv-aysa" else None
+
+    f = factura(servicio="aysa", identificador="1932903", monto=19120.69,
+                vencimiento=date(2026, 8, 20), nro_factura="0111B31161881")
+    with _Contexto(servicio=baulera) as ctx:
+        ctx.por_email.side_effect = por_email
+        res = registrar_factura(f, email_message_id="msg-aysa", hoy=HOY)
+
+    assert res.ya_existia is False
+    ctx.por_email.assert_called_once_with("msg-aysa", "srv-baulera")
+    assert ctx.insert.call_args[0][0]["servicio_id"] == "srv-baulera"
+    assert res.servicio is baulera
+
+
+@pytest.mark.unit
+def test_el_resultado_trae_el_servicio_ruteado():
+    """El poller lo usa para la carpeta de Drive y el nombre del resumen."""
+    with _Contexto() as ctx:
+        res = registrar_factura(factura(), hoy=HOY)
+    assert res.servicio is SERVICIO
 
 
 @pytest.mark.unit
@@ -299,6 +322,23 @@ def test_el_identificador_tiene_prioridad_sobre_el_slug():
         registrar_factura(factura(), hoy=HOY)
     assert ctx.insert.call_args[0][0]["servicio_id"] == "srv-edenor"
     ctx.por_slug.assert_not_called()
+
+
+@pytest.mark.unit
+def test_una_cuenta_no_registrada_no_cae_al_slug():
+    """
+    Bug real: una cuenta desconocida caía al slug del parser. Si el aviso de
+    AySA de octubre de 2026 hubiera traído primero la baulera (cuenta 1932903,
+    todavía sin registrar), se habría guardado como la factura del depto. Una
+    cuenta que no conocemos se rechaza y se avisa.
+    """
+    aysa = {"id": "srv-aysa", "slug": "aysa", "nombre": "AySA"}
+    f = factura(servicio="aysa", identificador="1932903", monto=19120.69)
+    with _Contexto(servicio=None, por_slug=aysa) as ctx:
+        with pytest.raises(ServicioDesconocido, match="1932903"):
+            registrar_factura(f, hoy=HOY)
+    ctx.por_slug.assert_not_called()
+    ctx.insert.assert_not_called()
 
 
 @pytest.mark.unit

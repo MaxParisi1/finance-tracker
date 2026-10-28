@@ -13,6 +13,7 @@ import { Modal, ModalTitle } from '@/components/ui/dialog'
 
 const FRECUENCIA_OPTIONS = [
   { value: 'mensual', label: 'Mensual' },
+  { value: 'semestral', label: 'Semestral' },
   { value: 'anual', label: 'Anual' },
   { value: 'semanal', label: 'Semanal' },
 ]
@@ -54,7 +55,9 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
     no_materializar: recurrente?.no_materializar ?? false,
   })
 
-  const usaSinDia = (form.frecuencia === 'mensual' || form.frecuencia === 'anual') && sinDia
+  // Anual y semestral se anclan a un mes; el semestral vence también seis meses después.
+  const conMes = form.frecuencia === 'anual' || form.frecuencia === 'semestral'
+  const usaSinDia = (form.frecuencia === 'mensual' || conMes) && sinDia
 
   function set(field: string, value: string | number) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -67,7 +70,7 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
         const payload = {
           ...form,
           dia_del_mes: usaSinDia ? null : form.dia_del_mes,
-          mes_del_anio: form.frecuencia === 'anual' ? form.mes_del_anio : undefined,
+          mes_del_anio: conMes ? form.mes_del_anio : undefined,
         }
         if (isEdit) {
           await updateRecurrenteAction(recurrente!.id, payload)
@@ -154,9 +157,9 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
               {FRECUENCIA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          {form.frecuencia === 'anual' && (
+          {conMes && (
             <div className="flex-1 min-w-[120px]">
-              <label className={labelClass}>Mes</label>
+              <label className={labelClass}>{form.frecuencia === 'semestral' ? 'Uno de los meses' : 'Mes'}</label>
               <select value={form.mes_del_anio} onChange={e => set('mes_del_anio', parseInt(e.target.value))} className={cn(fieldClass, 'cursor-pointer')}>
                 {MONTH_NAMES_CAP.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
               </select>
@@ -174,7 +177,7 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
           )}
         </div>
 
-        {(form.frecuencia === 'mensual' || form.frecuencia === 'anual') && (
+        {(form.frecuencia === 'mensual' || conMes) && (
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -188,7 +191,7 @@ export default function RecurrenteModal({ recurrente, categorias, onClose }: Pro
             <div>
               <p className="text-sm font-medium text-foreground">Sin día fijo de vencimiento</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {form.frecuencia === 'anual'
+                {conMes
                   ? 'Se paga en cualquier momento de ese mes (no va al calendario)'
                   : 'Se paga/debita en cualquier momento del mes (no va al calendario)'}
               </p>

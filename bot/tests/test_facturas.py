@@ -21,7 +21,7 @@ from bot.tools.expensas_pdf import (
 )
 from bot.tools.facturas import (
     FacturaIncompleta, FacturaIrrelevante, FacturaNoParseable, parsear_email,
-    servicio_de_remitente,
+    parsear_facturas, servicio_de_remitente,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -130,6 +130,55 @@ def test_aysa_extrae_numero_de_factura():
 def test_aysa_normaliza_ceros_a_la_izquierda():
     """El mail dice 000001929557 y el PDF 1929557: deben normalizar al mismo id."""
     assert parsear_email(cargar("aysa")).identificador == "1929557"
+
+
+# ──────────────────────────────────────────────
+# AySA con varias cuentas en el mismo aviso
+# ──────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_aysa_con_dos_cuentas_devuelve_una_factura_por_fila():
+    """
+    Bug real: el aviso del 20/10/2026 trajo el depto (cuenta 1929557) y la
+    baulera (cuenta 1932903, facturada aparte y por semestre) en la misma
+    tabla. El parser leía solo la primera fila y la baulera se perdía sin
+    aviso, con el mail marcado leído.
+    """
+    depto, baulera = parsear_facturas(cargar("aysa_dos_cuentas"))
+
+    assert (depto.identificador, depto.nro_factura) == ("1929557", "0111B31630809")
+    assert depto.monto == pytest.approx(32832.59)
+    assert depto.vencimiento == date(2026, 11, 12)
+
+    assert (baulera.identificador, baulera.nro_factura) == ("1932903", "0111B31161881")
+    assert baulera.monto == pytest.approx(19120.69)
+    assert baulera.vencimiento == date(2026, 11, 10)
+
+
+@pytest.mark.unit
+def test_cada_factura_de_aysa_lleva_todos_los_botones_y_ninguno_de_baja():
+    """
+    El PDF se empareja con su factura por contenido al bajarlo, no por el orden
+    de los botones: por eso cada factura lleva los dos links candidatos.
+    """
+    email = cargar("aysa_dos_cuentas")
+    depto, baulera = parsear_facturas(email)
+
+    assert len(depto.pdf_urls) == 2
+    assert depto.pdf_urls == baulera.pdf_urls
+    assert _href_de(email["html"], "link de baja") not in depto.pdf_urls
+
+
+@pytest.mark.unit
+def test_un_mail_de_una_sola_cuenta_sigue_dando_una_factura():
+    assert len(parsear_facturas(cargar("aysa"))) == 1
+
+
+@pytest.mark.unit
+def test_parsear_email_no_se_queda_con_la_primera_si_hay_varias():
+    """Quien espera una sola factura no puede recibir la primera y perder el resto."""
+    with pytest.raises(FacturaNoParseable, match="2 facturas"):
+        parsear_email(cargar("aysa_dos_cuentas"))
 
 
 @pytest.mark.unit

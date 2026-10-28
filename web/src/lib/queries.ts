@@ -482,6 +482,7 @@ export async function getRecurrentesConCosto(): Promise<{
 
     let mensual_ars: number
     if (r.frecuencia === 'anual') mensual_ars = Math.round(montoARS / 12)
+    else if (r.frecuencia === 'semestral') mensual_ars = Math.round(montoARS / 6)
     else if (r.frecuencia === 'semanal') mensual_ars = Math.round((montoARS * 52) / 12)
     else mensual_ars = Math.round(montoARS)
 
@@ -583,12 +584,15 @@ function ocurrenciaDelMes(r: GastoRecurrente, mes: number, anio: number): { belo
   const [, pm, pd] = r.proximo_vencimiento.split('-').map(Number)
   // Mensual sin día fija → pertenece a todos los meses, sin fecha de vencimiento.
   if (r.frecuencia === 'mensual' && r.dia_del_mes == null) return { belongs: true, occ: '' }
-  // Anual sin día fija → pertenece solo a su mes aniversario (el de proximo_vencimiento).
-  if (r.frecuencia === 'anual' && r.dia_del_mes == null) return { belongs: pm === mes, occ: '' }
+  // Anual → solo su mes aniversario (el de proximo_vencimiento). Semestral → ese
+  // mes y el que cae seis meses después.
+  const conMes = r.frecuencia === 'anual' || r.frecuencia === 'semestral'
+  const enSuMes = r.frecuencia === 'anual' ? pm === mes : (mes - pm + 12) % 6 === 0
+  if (conMes && r.dia_del_mes == null) return { belongs: enSuMes, occ: '' }
   const dia = r.dia_del_mes || pd || 1
-  if (r.frecuencia === 'anual') {
+  if (conMes) {
     const a = anclaDia(anio, mes - 1, dia)
-    return { belongs: pm === mes, occ: `${a.getFullYear()}-${pad2(a.getMonth() + 1)}-${pad2(a.getDate())}` }
+    return { belongs: enSuMes, occ: `${a.getFullYear()}-${pad2(a.getMonth() + 1)}-${pad2(a.getDate())}` }
   }
   const a = anclaDia(anio, mes - 1, r.frecuencia === 'semanal' ? 28 : dia)
   return { belongs: true, occ: `${a.getFullYear()}-${pad2(a.getMonth() + 1)}-${pad2(a.getDate())}` }
@@ -602,7 +606,7 @@ function ocurrenciaDelMes(r: GastoRecurrente, mes: number, anio: number): { belo
  *  - Mensual: el pago cuenta para el mes cuyo día-D está más cerca de la fecha
  *    del pago (así un pago adelantado del 29-jun cuenta para julio, y un único
  *    pago no se atribuye a dos meses).
- *  - Anual/semanal: pago dentro de ±30 días de la ocurrencia.
+ *  - Anual/semestral/semanal: pago dentro de ±30 días de la ocurrencia.
  * Pagado = hay un pago mapeado a este mes. Pendiente = pertenece al mes y no hay pago.
  */
 export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDelMes> {
@@ -676,8 +680,8 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       const dia = r.dia_del_mes ?? 1
       return pagos.find(g => mesDelPagoMensual(g.fecha, dia) === keyMes)
     }
-    if (r.frecuencia === 'anual' && r.dia_del_mes == null) {
-      // Anual sin día: mismo mes calendario y año.
+    if ((r.frecuencia === 'anual' || r.frecuencia === 'semestral') && r.dia_del_mes == null) {
+      // Anual o semestral sin día: mismo mes calendario y año.
       return pagos.find(g => g.fecha.slice(0, 7) === keyMes)
     }
     const occT = new Date(occ + 'T00:00:00').getTime()
@@ -703,7 +707,7 @@ export async function getFijosDelMes(mes: number, anio: number): Promise<FijosDe
       proximo_vencimiento: r.proximo_vencimiento,
     }
 
-    const sinDiaNominal = r.dia_del_mes == null && (r.frecuencia === 'mensual' || r.frecuencia === 'anual')
+    const sinDiaNominal = r.dia_del_mes == null && r.frecuencia !== 'semanal'
 
     // Con factura del mes tenemos fecha exacta: deja de ser un fijo "sin día".
     const fact = facturaPorRec.get(r.id)

@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, CheckCircle2, Paperclip, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 
-const FRECUENCIA_LABEL: Record<string, string> = { mensual: 'Mensual', anual: 'Anual', semanal: 'Semanal' }
+const FRECUENCIA_LABEL: Record<string, string> = { mensual: 'Mensual', semestral: 'Semestral', anual: 'Anual', semanal: 'Semanal' }
 
 const fechaCorta = (f: string) => new Date(f + 'T00:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
 

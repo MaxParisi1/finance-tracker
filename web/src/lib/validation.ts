@@ -9,7 +9,7 @@ export const MEDIOS_PAGO = [
   'transferencia',
 ] as const
 
-export const FRECUENCIAS = ['mensual', 'anual', 'semanal'] as const
+export const FRECUENCIAS = ['mensual', 'semestral', 'anual', 'semanal'] as const
 
 export const updateGastoSchema = z.object({
   descripcion: z.string().min(1).max(300),
@@ -41,6 +41,6 @@ export const recurrenteSchema = z.object({
   medio_pago: z.enum(MEDIOS_PAGO),
   frecuencia: z.enum(FRECUENCIAS),
   dia_del_mes: z.number().int().min(1).max(31).nullable(), // null = sin día fija
-  mes_del_anio: z.number().int().min(1).max(12).optional(), // solo anuales: mes del aniversario
+  mes_del_anio: z.number().int().min(1).max(12).optional(), // anuales y semestrales: mes del aniversario
   no_materializar: z.boolean().optional(),
 })

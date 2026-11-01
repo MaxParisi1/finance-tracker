@@ -396,9 +396,30 @@ def _es_aviso_expensas(email: dict) -> bool:
     return "expensa" in email.get("subject", "").lower()
 
 
+def _es_aviso_personal(email: dict) -> bool:
+    """
+    Unos días antes del vencimiento Personal manda "📅 En pocos días vence tu
+    factura" desde la misma casilla. Trae "Referente de pago" en el cuerpo, así
+    que los marcadores lo dejaban pasar y el parser alertaba por no encontrar el
+    saldo en el asunto. Recuerda una factura que ya entró con el aviso original.
+
+    Se descarta solo lo que se reconoce como recordatorio; cualquier otro mail
+    con marcadores sigue al parser y, si el formato cambió, alerta.
+    """
+    asunto = email.get("subject", "").lower()
+    if "saldo total es" in asunto:
+        return True
+    cuerpo = email.get("texto", "").lower()
+    if "vence tu factura" in asunto or "recordatorio de vencimiento" in cuerpo:
+        return False
+    heno = " ".join((asunto, cuerpo, email.get("html", "").lower()))
+    return any(m in heno for m in _MARCADORES["personal"])
+
+
 # Servicios cuyo "¿es un aviso de factura?" no se resuelve con substrings sueltos.
 _PREDICADOS = {
     "consorcio_gallo": _es_aviso_expensas,
+    "personal": _es_aviso_personal,
 }
 
 

@@ -86,6 +86,21 @@ Referente de Pago 8100682932410002
 Forma de pago Saldo Personal Pay
 Nro. de operación Pay 2922128404"""
 
+# Verbatim del comprobante de la app nueva de Personal Pay (noviembre 2026):
+# pierde la coma y la fecha del pago va en la línea siguiente al monto.
+COMPROBANTE_PERSONAL_APP_NUEVA = """Pago a
+Personal
+$ 76.12686
+01/11/26 10:04:55
+N° de operación
+3308760160
+Empresa
+Personal
+Referente de pago
+8100682932410002
+Medio de pago
+Dinero Personal Pay"""
+
 FACTURA_METROGAS = """LIQUIDACION DE SERVICIOS PÚBLICOS B-0064-70725805
 MetroGAS S.A.
 Maximo Parisi
@@ -267,6 +282,19 @@ def test_transferencia_de_expensas_completa():
     assert doc.servicio["slug"] == "consorcio_gallo"
     assert doc.tipo == TIPO_COMPROBANTE
     assert doc.monto == pytest.approx(258198.55)
+
+
+@pytest.mark.unit
+def test_el_monto_no_se_pega_con_la_fecha_de_la_linea_siguiente():
+    """
+    Bug real: la app nueva de Personal Pay escribe "$ 76.12686" y abajo
+    "01/11/26". La regex del monto aceptaba cualquier espacio, salto de línea
+    incluido, y se comía el "01" de la fecha: $76.126,86 se leía $7.612.686,01.
+    """
+    doc = _identificar(COMPROBANTE_PERSONAL_APP_NUEVA)
+    assert doc.servicio["slug"] == "personal"
+    assert doc.tipo == TIPO_COMPROBANTE
+    assert doc.monto == pytest.approx(76126.86)
 
 
 @pytest.mark.unit

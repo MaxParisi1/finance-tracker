@@ -154,8 +154,11 @@ def _primer_monto(texto: str) -> float | None:
     Monto del documento. Los comprobantes de Mercado Pago lo ponen arriba de
     todo ('$ 13.40584'), así que alcanza con el primer monto grande del texto.
     Devuelve None si no hay: el caller pide confirmación en vez de inventar.
+
+    El espacio interno (tokens partidos, "2 58.198,55") no puede ser un salto de
+    línea: Personal Pay pone la fecha abajo del monto y se pegaba al número.
     """
-    for m in re.finditer(r"\$\s*([\d.\s]+(?:,\d+)?)", texto):
+    for m in re.finditer(r"\$\s*([\d. \t]+(?:,\d+)?)", texto):
         try:
             valor = parse_monto_ar(m.group(1))
         except MontoInvalido:

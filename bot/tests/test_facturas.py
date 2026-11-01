@@ -497,6 +497,28 @@ def test_la_promo_trae_montos_señuelo_que_no_deben_tomarse():
 
 
 @pytest.mark.unit
+def test_el_recordatorio_de_vencimiento_de_personal_no_es_una_factura():
+    """
+    Bug real: "📅 En pocos días vence tu factura" llega del mismo remitente que
+    la factura y trae "Referente de pago" en el cuerpo, uno de los marcadores.
+    Pasaba el filtro, el parser no encontraba el saldo en el asunto y alertaba
+    cada 15 minutos. La factura que recuerda ya entró con el aviso original.
+    """
+    with pytest.raises(FacturaIrrelevante):
+        parsear_email(cargar("personal_recordatorio"))
+
+
+@pytest.mark.unit
+def test_un_asunto_de_personal_desconocido_con_referente_sigue_alertando():
+    """La contracara: solo se descarta el recordatorio, no cualquier formato nuevo."""
+    raro = {"from": "Personal <facturacion@email.personal.com.ar>",
+            "subject": "Tu nueva factura", "texto": "Referente de pago\n8100682932410002",
+            "html": ""}
+    with pytest.raises(FacturaNoParseable):
+        parsear_email(raro)
+
+
+@pytest.mark.unit
 def test_la_factura_real_de_personal_sigue_pasando():
     """La contracara: el marcador no puede descartar la factura verdadera."""
     assert parsear_email(cargar("personal")).monto == pytest.approx(67894.40)

@@ -36,6 +36,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
 )
+# httpx loguea en INFO cada request exitoso con la URL completa: el polling de
+# Telegram y el loop de resúmenes son ~12 líneas por minuto que no dicen nada,
+# y las de Telegram llevan el token del bot en la URL. En WARNING sigue
+# avisando lo que importa; los errores de red llegan además como excepción al
+# código que hizo el request, que los loguea con su contexto.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ID de Telegram del único usuario autorizado

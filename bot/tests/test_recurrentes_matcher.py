@@ -121,15 +121,30 @@ CUOTA_PLUS = {
 }
 
 
-def _buscar(gasto, *, ya_cobrado_en_el_periodo, aliases=None, llm=0.0):
-    """Corre el matcher con la base mockeada. Devuelve (candidato, mock del chequeo de período)."""
-    aliases = {"dlo pedidosya plus": PLUS_ID} if aliases is None else aliases
-    with patch.object(matcher.queries, "obtener_recurrentes_activos", return_value=[PEDIDOSYA_PLUS]), \
+MAPFRE_ID = "21e8f7ea-6cae-4bed-b0b8-9930a898254f"
+MAPFRE = {
+    "id": MAPFRE_ID, "descripcion": "Mapfre Seguros", "monto_original": 100011.78,
+    "moneda": "ARS", "frecuencia": "mensual", "dia_del_mes": None,
+    "proximo_vencimiento": "2026-06-03",
+}
+MAPFRE_31_MAYO = {
+    "id": "0d5b3a2e-1c4f-4e8a-9b7d-6f2e1a3c5b7d", "comercio": "Mapfre Seguros Sa",
+    "monto_original": 104491.14, "moneda": "ARS", "fecha": "2026-05-31",
+}
+
+
+def _buscar(gasto, *, vinculados, recurrente=PEDIDOSYA_PLUS, aliases=None, llm=0.0):
+    """
+    Corre el matcher con la base mockeada. `vinculados` es cuántos gastos ya
+    tiene el recurrente entre el período anterior y el actual.
+    """
+    aliases = {"dlo pedidosya plus": PLUS_ID, "mapfre seguros sa": MAPFRE_ID} if aliases is None else aliases
+    with patch.object(matcher.queries, "obtener_recurrentes_activos", return_value=[recurrente]), \
          patch.object(matcher.queries, "obtener_aliases_recurrentes", return_value=aliases), \
-         patch.object(matcher.queries, "hay_gasto_vinculado_entre",
-                      return_value=ya_cobrado_en_el_periodo) as periodo, \
+         patch.object(matcher.queries, "contar_gastos_vinculados_entre",
+                      return_value=vinculados) as conteo, \
          patch.object(matcher, "_score_llm", return_value=llm):
-        return matcher.encontrar_candidato_db(gasto), periodo
+        return matcher.encontrar_candidato_db(gasto), conteo
 
 
 @pytest.mark.unit
@@ -138,29 +153,53 @@ def test_una_propina_no_se_vincula_sola_al_recurrente_ya_cobrado_en_el_mes():
     Bug real: el 31/10 una propina de PedidosYa ($4.000) se vinculó sola a
     PedidosYa Plus. El fuzzy contra el alias "dlo pedidosya plus" dio 90 por la
     subcadena "dlo pedidosya p", el monto cayó dentro del margen y, como el
-    recurrente no tiene día fijo, la fecha no se miró: no importó que la cuota
-    de octubre ya estuviera vinculada desde el 07/10. Un segundo cargo en el
-    mismo período no se vincula sin preguntar.
+    recurrente no tiene día fijo, la fecha no se miró. Septiembre y octubre ya
+    tenían su cuota vinculada: no hay período libre donde imputarla, así que
+    se pregunta.
     """
-    candidato, periodo = _buscar(PROPINA, ya_cobrado_en_el_periodo=True)
+    candidato, conteo = _buscar(PROPINA, vinculados=2)
 
     assert candidato is not None
     assert candidato.metodo == "usuario_pendiente"
-    periodo.assert_called_once_with(PLUS_ID, "2026-10-01", "2026-10-31", excluir_gasto_id=PROPINA["id"])
+    # Mira el período anterior y el actual juntos.
+    conteo.assert_called_once_with(PLUS_ID, "2026-09-01", "2026-10-31", excluir_gasto_id=PROPINA["id"])
+
+
+@pytest.mark.unit
+def test_un_debito_adelantado_ocupa_el_periodo_anterior_libre():
+    """
+    Caso real: Mapfre debitó el 03/05 y el 31/05, y los dos eran legítimos
+    (el del 31 es la cuota de junio, adelantada). Abril estaba vacío, así que
+    entre los dos períodos hay un solo cobro y el segundo se vincula solo.
+    """
+    candidato, conteo = _buscar(MAPFRE_31_MAYO, vinculados=1, recurrente=MAPFRE)
+
+    assert candidato.metodo == "alias"
+    conteo.assert_called_once_with(MAPFRE_ID, "2026-04-01", "2026-05-31", excluir_gasto_id=MAPFRE_31_MAYO["id"])
 
 
 @pytest.mark.unit
 def test_el_cobro_del_mes_se_sigue_vinculando_solo():
-    candidato, _ = _buscar(CUOTA_PLUS, ya_cobrado_en_el_periodo=False)
+    candidato, _ = _buscar(CUOTA_PLUS, vinculados=1)
     assert candidato is not None
     assert candidato.metodo == "alias"
 
 
 @pytest.mark.unit
-def test_un_alias_tampoco_vincula_dos_veces_en_el_mismo_mes():
-    """El alias se salta monto y fecha; el período es lo único que lo frena."""
-    candidato, _ = _buscar(CUOTA_PLUS, ya_cobrado_en_el_periodo=True)
+def test_un_alias_tampoco_vincula_un_tercer_cobro():
+    """El alias se salta monto y fecha; el conteo de períodos es lo único que lo frena."""
+    candidato, _ = _buscar(CUOTA_PLUS, vinculados=2)
     assert candidato.metodo == "usuario_pendiente"
+
+
+@pytest.mark.unit
+def test_periodo_anterior_segun_frecuencia():
+    assert matcher._periodo_anterior("2026-01-15", "mensual") == ("2025-12-01", "2025-12-31")
+    assert matcher._periodo_anterior("2026-03-31", "mensual") == ("2026-02-01", "2026-02-28")
+    assert matcher._periodo_anterior("2026-08-03", "semestral") == ("2026-01-01", "2026-06-30")
+    assert matcher._periodo_anterior("2026-03-03", "semestral") == ("2025-07-01", "2025-12-31")
+    assert matcher._periodo_anterior("2026-05-31", "anual") == ("2025-01-01", "2025-12-31")
+    assert matcher._periodo_anterior("2026-11-11", "semanal") == ("2026-11-02", "2026-11-08")
 
 
 @pytest.mark.unit

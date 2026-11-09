@@ -1310,3 +1310,70 @@ export async function getPendientes(): Promise<Pendiente[]> {
 function formatARSLocal(monto: number): string {
   return `$${Math.round(monto).toLocaleString('es-AR')}`
 }
+
+// ──────────────────────────────────────────────
+// Resúmenes de tarjeta (conciliación)
+// ──────────────────────────────────────────────
+
+export interface ResumenTarjeta {
+  id: string
+  nombre_archivo: string | null
+  estado: 'pendiente' | 'procesado' | 'error'
+  error: string | null
+  cierre: string | null
+  cierre_anterior: string | null
+  vencimiento: string | null
+  saldo_actual: { ARS?: string; USD?: string } | null
+  sin_movimiento: { id: string; fecha: string; comercio: string | null; monto: number | null; moneda: string | null }[]
+  created_at: string
+  tarjeta: { sufijo: string; nombre: string | null; red: string | null } | null
+}
+
+export interface MovimientoResumen {
+  id: string
+  orden: number
+  seccion: 'pago' | 'consumo' | 'impuesto'
+  fecha: string
+  descripcion: string
+  cupon: string | null
+  monto: number
+  moneda: 'ARS' | 'USD'
+  cuota_actual: number | null
+  cuotas_total: number | null
+  estado: string
+  gasto_id: string | null
+  categoria_sugerida: string | null
+  recurrente_id: string | null
+}
+
+const SELECT_RESUMEN =
+  'id, nombre_archivo, estado, error, cierre, cierre_anterior, vencimiento, saldo_actual, sin_movimiento, created_at, tarjeta:tarjetas(sufijo, nombre, red)'
+
+export async function getResumenesTarjeta(): Promise<ResumenTarjeta[]> {
+  const supabase = getSupabaseServer()
+  const { data, error } = await supabase
+    .from('resumenes_tarjeta')
+    .select(SELECT_RESUMEN)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as ResumenTarjeta[]
+}
+
+export async function getResumenTarjeta(id: string): Promise<{
+  resumen: ResumenTarjeta
+  movimientos: MovimientoResumen[]
+} | null> {
+  const supabase = getSupabaseServer()
+  const [r, m] = await Promise.all([
+    supabase.from('resumenes_tarjeta').select(SELECT_RESUMEN).eq('id', id).maybeSingle(),
+    supabase.from('resumen_movimientos').select('*').eq('resumen_id', id).order('orden'),
+  ])
+  if (r.error) throw new Error(r.error.message)
+  if (m.error) throw new Error(m.error.message)
+  if (!r.data) return null
+  return {
+    resumen: r.data as unknown as ResumenTarjeta,
+    movimientos: (m.data ?? []).map(x => ({ ...x, monto: Number(x.monto) })) as MovimientoResumen[],
+  }
+}

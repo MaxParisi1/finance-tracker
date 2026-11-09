@@ -156,32 +156,58 @@ def _periodo(fecha: str, frecuencia: str | None) -> tuple[str, str]:
     return desde.isoformat(), hasta.isoformat()
 
 
+def _periodo_anterior(fecha: str, frecuencia: str | None) -> tuple[str, str]:
+    """El período inmediatamente anterior al que contiene `fecha`."""
+    desde, _ = _periodo(fecha, frecuencia)
+    return _periodo((date.fromisoformat(desde) - timedelta(days=1)).isoformat(), frecuencia)
+
+
 def encontrar_candidato_db(gasto: dict) -> CandidatoMatch | None:
     """
     Consulta DB y corre el pipeline de matching.
     Llamar con asyncio.to_thread desde código async.
 
-    Un recurrente se cobra una vez por período. Si ya tiene un gasto vinculado
-    en el período de este, un match automático baja a "preguntar": puede ser un
-    cargo distinto del mismo comercio (una propina de PedidosYa contra Plus) o
-    un cobro duplicado, y eso lo decide el usuario.
+    Un recurrente se cobra una vez por período, pero un débito puede adelantarse
+    (Mapfre cobró el 03/05 y el 31/05: el segundo era la cuota de junio). Por
+    eso se miran el período anterior y el actual juntos: con menos de dos
+    cobros vinculados entre ambos hay un período libre donde imputarlo y se
+    vincula solo. Si los dos ya están ocupados, un match automático baja a
+    "preguntar": es un cargo distinto del mismo comercio (una propina de
+    PedidosYa contra Plus) o un cobro duplicado, y eso lo decide el usuario.
+
+    Solo cuenta el período inmediato anterior: los huecos más viejos los
+    resuelve la conciliación del resumen, no cualquier cargo parecido.
     """
     candidato = _buscar_candidato(gasto)
     if candidato is None or candidato.metodo not in METODOS_AUTOMATICOS or not gasto.get('fecha'):
         return candidato
 
     rec = candidato.recurrente
-    desde, hasta = _periodo(gasto['fecha'], rec.get('frecuencia'))
-    if queries.hay_gasto_vinculado_entre(rec['id'], desde, hasta, excluir_gasto_id=gasto.get('id')):
+    desde, _ = _periodo_anterior(gasto['fecha'], rec.get('frecuencia'))
+    _, hasta = _periodo(gasto['fecha'], rec.get('frecuencia'))
+    vinculados = queries.contar_gastos_vinculados_entre(
+        rec['id'], desde, hasta, excluir_gasto_id=gasto.get('id'),
+    )
+    if vinculados >= 2:
         logger.info(
-            "  %r ya tiene un pago vinculado entre %s y %s → se pregunta al usuario",
-            rec.get('descripcion'), desde, hasta,
+            "  %r ya tiene %d pagos vinculados entre %s y %s → se pregunta al usuario",
+            rec.get('descripcion'), vinculados, desde, hasta,
         )
         return CandidatoMatch(recurrente=rec, confianza=candidato.confianza, metodo='usuario_pendiente')
     return candidato
 
 
-def _buscar_candidato(gasto: dict) -> CandidatoMatch | None:
+def sugerir_recurrente(gasto: dict) -> dict | None:
+    """
+    El recurrente al que probablemente corresponde un gasto, sin LLM: solo
+    alias confirmado o fuzzy alto. Es una sugerencia para la conciliación del
+    resumen; vincular lo decide el usuario.
+    """
+    candidato = _buscar_candidato(gasto, con_llm=False)
+    return candidato.recurrente if candidato else None
+
+
+def _buscar_candidato(gasto: dict, con_llm: bool = True) -> CandidatoMatch | None:
     recurrentes = queries.obtener_recurrentes_activos()
     if not recurrentes:
         logger.info("Match recurrente: no hay recurrentes activos")
@@ -252,7 +278,7 @@ def _buscar_candidato(gasto: dict) -> CandidatoMatch | None:
         return CandidatoMatch(recurrente=best_rec, confianza=best_score / 100, metodo='fuzzy')
 
     # Capas 3-4: el LLM sólo si hay candidato razonablemente cercano
-    if best_score >= FUZZY_LLM:
+    if con_llm and best_score >= FUZZY_LLM:
         conf = _score_llm(gasto, best_rec)
         logger.info("  LLM confianza=%.2f", conf)
         if conf >= 0.80:

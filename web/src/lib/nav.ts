@@ -34,6 +34,7 @@ export const SECCIONES: Seccion[] = [
     tabs: [
       { href: '/registro', label: 'Registro' },
       { href: '/comprobantes', label: 'Comprobantes' },
+      { href: '/resumenes', label: 'Resúmenes' },
     ],
   },
   {

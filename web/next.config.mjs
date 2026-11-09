@@ -7,6 +7,10 @@ const nextConfig = {
   // cargue con require() en runtime.
   experimental: {
     serverComponentsExternalPackages: ['nodemailer'],
+    // El default de las server actions es 1 MB; un resumen de tarjeta de varias
+    // páginas lo pasa (el de Mastercard de octubre pesa 360 KB, pero los hay
+    // más largos).
+    serverActions: { bodySizeLimit: '10mb' },
   },
 }
 

@@ -517,6 +517,7 @@ async def start_gmail_polling(bot, chat_id: int) -> None:
     """Arranca los loops de polling en paralelo."""
     from bot.facturas_poller import LABEL_NAME_FACTURAS, poll_facturas_once
     from bot.tools.recordatorios import loop_recordatorios
+    from bot.tools.resumenes import loop_resumenes
 
     logger.info("Gmail pollers iniciados (intervalo: %ds)", POLL_INTERVAL)
     await asyncio.gather(
@@ -524,6 +525,7 @@ async def start_gmail_polling(bot, chat_id: int) -> None:
         _loop_poll(bot, chat_id, poll_visa_once, LABEL_NAME_VISA),
         _loop_poll(bot, chat_id, poll_facturas_once, LABEL_NAME_FACTURAS),
         loop_recordatorios(bot, chat_id),
+        loop_resumenes(),
     )
 
 

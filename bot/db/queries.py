@@ -214,14 +214,29 @@ def actualizar_monto_recurrente(recurrente_id: str, nuevo_monto: float) -> None:
     logger.info("Recurrente %s → monto_original=%s", recurrente_id, nuevo_monto)
 
 
-def hay_gasto_vinculado_entre(
+def gastos_entre(desde: str, hasta: str) -> list[dict]:
+    """Gastos vigentes con fecha en [desde, hasta], con lo que necesita la conciliación."""
+    client = get_client()
+    res = (
+        client.table("gastos")
+        .select("id, fecha, monto_original, moneda, comercio, descripcion, tarjeta, medio_pago, fuente, recurrente_id")
+        .is_("deleted_at", "null")
+        .gte("fecha", desde)
+        .lte("fecha", hasta)
+        .order("fecha")
+        .execute()
+    )
+    return res.data
+
+
+def contar_gastos_vinculados_entre(
     recurrente_id: str, desde: str, hasta: str, excluir_gasto_id: str | None = None
-) -> bool:
-    """True si el recurrente ya tiene un gasto vigente vinculado con fecha en [desde, hasta]."""
+) -> int:
+    """Cuántos gastos vigentes vinculados al recurrente tienen fecha en [desde, hasta]."""
     client = get_client()
     q = (
         client.table("gastos")
-        .select("id")
+        .select("id", count="exact")
         .eq("recurrente_id", recurrente_id)
         .is_("deleted_at", "null")
         .gte("fecha", desde)
@@ -229,7 +244,7 @@ def hay_gasto_vinculado_entre(
     )
     if excluir_gasto_id:
         q = q.neq("id", excluir_gasto_id)
-    return bool(q.limit(1).execute().data)
+    return q.execute().count or 0
 
 
 def obtener_aliases_recurrentes() -> dict[str, str]:
@@ -568,3 +583,68 @@ def guardar_estado(clave: str, valor: Any) -> None:
          "updated_at": datetime.now(timezone.utc).isoformat()},
         on_conflict="clave",
     ).execute()
+
+
+# ──────────────────────────────────────────────
+# Resúmenes de tarjeta (conciliación)
+# ──────────────────────────────────────────────
+
+def resumenes_pendientes() -> list[dict]:
+    client = get_client()
+    return client.table("resumenes_tarjeta").select("*").eq("estado", "pendiente").order("created_at").execute().data
+
+
+def descargar_resumen(storage_path: str) -> bytes:
+    return get_client().storage.from_("resumenes").download(storage_path)
+
+
+def tarjeta_por_cuenta(cuenta: str) -> dict | None:
+    client = get_client()
+    res = client.table("tarjetas").select("*").eq("cuenta", cuenta).limit(1).execute()
+    return res.data[0] if res.data else None
+
+
+def otro_resumen_con_cierre(resumen_id: str, tarjeta_id: str, cierre: str) -> bool:
+    """True si ya hay otro resumen procesado de la misma tarjeta y cierre."""
+    client = get_client()
+    res = (
+        client.table("resumenes_tarjeta").select("id")
+        .eq("tarjeta_id", tarjeta_id).eq("cierre", cierre).neq("id", resumen_id)
+        .limit(1).execute()
+    )
+    return bool(res.data)
+
+
+def reemplazar_movimientos_resumen(resumen_id: str, filas: list[dict]) -> None:
+    """Borra y vuelve a insertar: reprocesar un resumen que quedó a medias no duplica."""
+    client = get_client()
+    client.table("resumen_movimientos").delete().eq("resumen_id", resumen_id).execute()
+    if filas:
+        client.table("resumen_movimientos").insert(filas).execute()
+
+
+def actualizar_resumen(resumen_id: str, campos: dict) -> None:
+    get_client().table("resumenes_tarjeta").update(campos).eq("id", resumen_id).execute()
+
+
+def movimientos_a_cargar() -> list[dict]:
+    """Movimientos que el usuario eligió cargar desde la web, con su resumen y tarjeta."""
+    client = get_client()
+    return (
+        client.table("resumen_movimientos")
+        .select("*, resumenes_tarjeta(id, cierre, tarjeta_id, tarjetas(*))")
+        .eq("estado", "a_cargar")
+        .order("orden")
+        .execute()
+        .data
+    )
+
+
+def gasto_por_email(message_id: str) -> dict | None:
+    client = get_client()
+    res = client.table("gastos").select("id").eq("email_message_id", message_id).limit(1).execute()
+    return res.data[0] if res.data else None
+
+
+def actualizar_movimiento_resumen(movimiento_id: str, campos: dict) -> None:
+    get_client().table("resumen_movimientos").update(campos).eq("id", movimiento_id).execute()

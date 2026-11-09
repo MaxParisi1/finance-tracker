@@ -59,16 +59,31 @@ export async function cargarMovimientosAction(
 ): Promise<{ ok: true } | { error: string }> {
   exigirSesion()
   if (items.length === 0) return { error: 'No elegiste ningún movimiento.' }
-  if (items.some(i => !i.categoria)) return { error: 'Todos los movimientos a cargar necesitan categoría.' }
 
   const supabase = getSupabaseServer()
+  // Una bonificación no lleva categoría: se resta del gasto de su consumo.
+  const { data: filas, error: errFilas } = await supabase
+    .from('resumen_movimientos')
+    .select('id, estado')
+    .eq('resumen_id', resumenId)
+    .in('id', items.map(i => i.id))
+  if (errFilas) return { error: errFilas.message }
+  const estado = new Map((filas ?? []).map(f => [f.id, f.estado as string]))
+  if (items.some(i => !i.categoria && estado.get(i.id) !== 'bonificacion')) {
+    return { error: 'Todos los movimientos a cargar necesitan categoría.' }
+  }
+
   for (const item of items) {
     const { error } = await supabase
       .from('resumen_movimientos')
-      .update({ estado: 'a_cargar', categoria_sugerida: item.categoria, recurrente_id: item.recurrente_id })
+      .update({
+        estado: 'a_cargar',
+        categoria_sugerida: item.categoria || null,
+        recurrente_id: item.recurrente_id,
+      })
       .eq('id', item.id)
       .eq('resumen_id', resumenId)
-      .in('estado', ['falta', 'impuesto', 'percepcion', 'descartado'])
+      .in('estado', ['falta', 'impuesto', 'percepcion', 'bonificacion', 'descartado'])
     if (error) return { error: error.message }
   }
   revalidatePath(`/resumenes/${resumenId}`)
@@ -87,7 +102,7 @@ export async function descartarMovimientosAction(
     .update({ estado: 'descartado' })
     .in('id', ids)
     .eq('resumen_id', resumenId)
-    .in('estado', ['falta', 'impuesto', 'percepcion'])
+    .in('estado', ['falta', 'impuesto', 'percepcion', 'bonificacion'])
   if (error) return { error: error.message }
   revalidatePath(`/resumenes/${resumenId}`)
   return { ok: true }

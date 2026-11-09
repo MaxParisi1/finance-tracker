@@ -19,51 +19,106 @@ interface Props {
   recurrentes: { id: string; descripcion: string; categoria: string }[]
 }
 
-/** Lo que el usuario tiene que decidir. */
-const A_REVISAR = new Set(['falta', 'impuesto', 'percepcion', 'descartado'])
+const CATEGORIA_IMPUESTOS = 'Impuestos y comisiones'
+const A_REVISAR = new Set(['falta', 'impuesto', 'percepcion', 'bonificacion', 'descartado'])
 
 function monto(valor: number, moneda: string): string {
   const n = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(valor)
   return moneda === 'USD' ? `US$ ${n}` : `$ ${n}`
 }
 
-function etiqueta(m: MovimientoResumen): { texto: string; nota?: string } {
-  if (m.estado === 'percepcion') {
-    return {
-      texto: 'Percepción',
-      nota: 'Te la devuelven en el resumen siguiente si pagás los dólares en dólares.',
-    }
-  }
-  if (m.estado === 'impuesto') return { texto: 'Impuesto o cargo' }
-  if (m.estado === 'descartado') return { texto: 'Descartado' }
-  if (m.monto < 0) return { texto: 'Bonificación' }
-  return { texto: 'No registrado' }
+/**
+ * Una fila de "Para revisar". Los impuestos del resumen son UNA fila (se
+ * cargan como un solo gasto); el resto es un movimiento por fila.
+ */
+interface Fila {
+  clave: string
+  ids: string[]
+  titulo: string
+  detalle: string
+  nota?: string
+  monto: number
+  moneda: string
+  tipo: 'consumo' | 'impuestos' | 'percepcion' | 'bonificacion'
+  marcada: boolean
+  categoria: string
+  recurrente: string
 }
 
-/** Marcado por defecto: lo que es un gasto real que falta. */
-function marcadoInicial(m: MovimientoResumen): boolean {
-  if (m.estado === 'falta') return m.monto > 0
-  return m.estado === 'impuesto'
+function armarFilas(movimientos: MovimientoResumen[]): Fila[] {
+  const revisar = movimientos.filter(m => A_REVISAR.has(m.estado))
+  const esImpuesto = (m: MovimientoResumen) => m.seccion === 'impuesto' && !/^DB\.?RG\s*5617/i.test(m.descripcion)
+  const filas: Fila[] = []
+
+  for (const moneda of ['ARS', 'USD']) {
+    const imp = revisar.filter(m => esImpuesto(m) && m.moneda === moneda)
+    if (imp.length === 0) continue
+    const descartados = imp.every(m => m.estado === 'descartado')
+    filas.push({
+      clave: `impuestos-${moneda}`,
+      ids: imp.map(m => m.id),
+      titulo: 'Impuestos y cargos del resumen',
+      detalle: descartados ? 'Descartado' : `${imp.length} conceptos, se cargan como un solo gasto`,
+      nota: imp.map(m => m.descripcion).join(' · '),
+      monto: Math.round(imp.reduce((s, m) => s + m.monto, 0) * 100) / 100,
+      moneda,
+      tipo: 'impuestos',
+      marcada: !descartados,
+      categoria: CATEGORIA_IMPUESTOS,
+      recurrente: '',
+    })
+  }
+
+  for (const m of revisar) {
+    if (esImpuesto(m)) continue
+    const fecha = formatDate(m.fecha)
+    const cuota = m.cuota_actual ? ` · cuota ${m.cuota_actual}/${m.cuotas_total}` : ''
+    const base = {
+      clave: m.id, ids: [m.id], titulo: m.descripcion, monto: m.monto, moneda: m.moneda,
+      categoria: m.categoria_sugerida ?? '', recurrente: m.recurrente_id ?? '',
+    }
+    if (m.estado === 'percepcion') {
+      filas.push({
+        ...base, tipo: 'percepcion', marcada: false, detalle: `${fecha} · Percepción`,
+        nota: 'Te la devuelven en el resumen siguiente si pagás los dólares en dólares.',
+      })
+    } else if (m.estado === 'bonificacion') {
+      const consumo = movimientos.find(x => x.cupon === m.cupon && x.monto > 0 && x.seccion === 'consumo')
+      const origen = m.gasto
+      filas.push({
+        ...base, tipo: 'bonificacion', marcada: true, categoria: '',
+        detalle: `${fecha} · Bonificación`,
+        nota: origen
+          ? `Se resta de ${origen.comercio ?? 'su consumo'}: ${monto(origen.monto_original, m.moneda)} → ${monto(origen.monto_original + m.monto, m.moneda)}`
+          : `Se resta de ${consumo?.descripcion ?? 'su consumo'} cuando lo cargues.`,
+      })
+    } else {
+      filas.push({
+        ...base, tipo: 'consumo',
+        marcada: m.estado === 'falta' && m.monto > 0,
+        detalle: `${fecha} · ${m.estado === 'descartado' ? 'Descartado' : m.monto < 0 ? 'Crédito' : 'No registrado'}${cuota}`,
+      })
+    }
+  }
+  return filas
 }
 
 export default function ConciliacionView({ resumen, movimientos, categorias, recurrentes }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
 
-  const revisar = movimientos.filter(m => A_REVISAR.has(m.estado))
+  const filas = useMemo(() => armarFilas(movimientos), [movimientos])
   const enCarga = movimientos.filter(m => m.estado === 'a_cargar')
-  const cargados = movimientos.filter(m => m.estado === 'cargado')
+  const cargados = movimientos.filter(m => m.estado === 'cargado' || m.estado === 'aplicada')
   const registrados = movimientos.filter(m => m.estado === 'coincide' || m.estado === 'cuota_registrada')
   const pagos = movimientos.filter(m => m.estado === 'pago' || m.estado === 'reintegro')
 
-  const [marcados, setMarcados] = useState<Set<string>>(
-    () => new Set(revisar.filter(marcadoInicial).map(m => m.id)),
-  )
+  const [marcadas, setMarcadas] = useState<Set<string>>(() => new Set(filas.filter(f => f.marcada).map(f => f.clave)))
   const [categoria, setCategoria] = useState<Record<string, string>>(
-    () => Object.fromEntries(revisar.map(m => [m.id, m.categoria_sugerida ?? ''])),
+    () => Object.fromEntries(filas.map(f => [f.clave, f.categoria])),
   )
   const [recurrente, setRecurrente] = useState<Record<string, string>>(
-    () => Object.fromEntries(revisar.map(m => [m.id, m.recurrente_id ?? ''])),
+    () => Object.fromEntries(filas.map(f => [f.clave, f.recurrente])),
   )
 
   // El bot procesa el resumen y carga los gastos en segundo plano: mientras
@@ -75,28 +130,30 @@ export default function ConciliacionView({ resumen, movimientos, categorias, rec
     return () => clearInterval(t)
   }, [esperando, router])
 
-  const elegidos = useMemo(() => revisar.filter(m => marcados.has(m.id)), [revisar, marcados])
-  const sinCategoria = elegidos.filter(m => !categoria[m.id])
+  const elegidas = filas.filter(f => marcadas.has(f.clave))
+  const sinCategoria = elegidas.filter(f => f.tipo !== 'bonificacion' && !categoria[f.clave])
 
-  function alternar(id: string) {
-    setMarcados(prev => {
+  function alternar(clave: string) {
+    setMarcadas(prev => {
       const s = new Set(prev)
-      if (s.has(id)) s.delete(id)
-      else s.add(id)
+      if (s.has(clave)) s.delete(clave)
+      else s.add(clave)
       return s
     })
   }
 
   function cargar() {
     startTransition(async () => {
-      const r = await cargarMovimientosAction(
-        resumen.id,
-        elegidos.map(m => ({ id: m.id, categoria: categoria[m.id], recurrente_id: recurrente[m.id] || null })),
-      )
+      const items = elegidas.flatMap(f => f.ids.map(id => ({
+        id,
+        categoria: f.tipo === 'bonificacion' ? '' : categoria[f.clave],
+        recurrente_id: recurrente[f.clave] || null,
+      })))
+      const r = await cargarMovimientosAction(resumen.id, items)
       if ('error' in r) toast.error(r.error)
       else {
-        toast.success(`Cargando ${elegidos.length} gasto${elegidos.length === 1 ? '' : 's'}…`)
-        setMarcados(new Set())
+        toast.success('Cargando… tarda unos segundos.')
+        setMarcadas(new Set())
         router.refresh()
       }
     })
@@ -104,10 +161,10 @@ export default function ConciliacionView({ resumen, movimientos, categorias, rec
 
   function descartar() {
     startTransition(async () => {
-      const r = await descartarMovimientosAction(resumen.id, elegidos.map(m => m.id))
+      const r = await descartarMovimientosAction(resumen.id, elegidas.flatMap(f => f.ids))
       if ('error' in r) toast.error(r.error)
       else {
-        setMarcados(new Set())
+        setMarcadas(new Set())
         router.refresh()
       }
     })
@@ -178,73 +235,69 @@ export default function ConciliacionView({ resumen, movimientos, categorias, rec
             <p className="text-sm text-muted-foreground mb-3">
               Está en el resumen y no en tus gastos. Elegí qué cargar.
             </p>
-            {revisar.length === 0 ? (
+            {filas.length === 0 ? (
               <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground flex items-center gap-2">
                 <Check className="h-4 w-4 text-emerald-500" aria-hidden /> No falta nada.
               </p>
             ) : (
               <>
                 <div className="rounded-xl border border-border divide-y divide-border">
-                  {revisar.map(m => {
-                    const e = etiqueta(m)
-                    return (
-                      <div key={m.id} className="p-3 flex flex-col md:flex-row md:items-center gap-3">
-                        <label className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="mt-1 h-4 w-4 accent-primary"
-                            checked={marcados.has(m.id)}
-                            onChange={() => alternar(m.id)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block font-medium text-foreground truncate" title={m.descripcion}>
-                              {m.descripcion}
-                            </span>
-                            <span className="block text-xs text-muted-foreground">
-                              {formatDate(m.fecha)} · {e.texto}
-                              {m.cuota_actual && ` · cuota ${m.cuota_actual}/${m.cuotas_total}`}
-                            </span>
-                            {e.nota && <span className="block text-xs text-muted-foreground mt-0.5">{e.nota}</span>}
-                          </span>
-                        </label>
-                        <span className="tabular-nums font-medium text-foreground md:w-32 md:text-right">
-                          {monto(m.monto, m.moneda)}
+                  {filas.map(f => (
+                    <div key={f.clave} className="p-3 flex flex-col md:flex-row md:items-center gap-3">
+                      <label className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-primary"
+                          checked={marcadas.has(f.clave)}
+                          onChange={() => alternar(f.clave)}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium text-foreground truncate" title={f.titulo}>{f.titulo}</span>
+                          <span className="block text-xs text-muted-foreground">{f.detalle}</span>
+                          {f.nota && (
+                            <span className="block text-xs text-muted-foreground mt-0.5" title={f.nota}>{f.nota}</span>
+                          )}
                         </span>
+                      </label>
+                      <span className="tabular-nums font-medium text-foreground md:w-32 md:text-right">
+                        {monto(f.monto, f.moneda)}
+                      </span>
+                      {f.tipo !== 'bonificacion' && (
                         <select
                           aria-label="Categoría"
-                          value={categoria[m.id]}
-                          onChange={ev => setCategoria(c => ({ ...c, [m.id]: ev.target.value }))}
+                          value={categoria[f.clave]}
+                          onChange={ev => setCategoria(c => ({ ...c, [f.clave]: ev.target.value }))}
                           className="h-9 rounded-md border border-input bg-background px-2 text-sm md:w-44"
                         >
                           <option value="">Categoría…</option>
                           {categorias.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        {m.seccion === 'consumo' && (
-                          <select
-                            aria-label="Gasto fijo"
-                            value={recurrente[m.id]}
-                            onChange={ev => {
-                              const id = ev.target.value
-                              setRecurrente(r => ({ ...r, [m.id]: id }))
-                              const rec = recurrentes.find(x => x.id === id)
-                              if (rec && !categoria[m.id]) setCategoria(c => ({ ...c, [m.id]: rec.categoria }))
-                            }}
-                            className="h-9 rounded-md border border-input bg-background px-2 text-sm md:w-44"
-                          >
-                            <option value="">Sin gasto fijo</option>
-                            {recurrentes.map(r => <option key={r.id} value={r.id}>{r.descripcion}</option>)}
-                          </select>
-                        )}
-                      </div>
-                    )
-                  })}
+                      )}
+                      {f.tipo === 'consumo' && (
+                        <select
+                          aria-label="Gasto fijo"
+                          value={recurrente[f.clave]}
+                          onChange={ev => {
+                            const id = ev.target.value
+                            setRecurrente(r => ({ ...r, [f.clave]: id }))
+                            const rec = recurrentes.find(x => x.id === id)
+                            if (rec) setCategoria(c => ({ ...c, [f.clave]: rec.categoria }))
+                          }}
+                          className="h-9 rounded-md border border-input bg-background px-2 text-sm md:w-44"
+                        >
+                          <option value="">Sin gasto fijo</option>
+                          {recurrentes.map(r => <option key={r.id} value={r.id}>{r.descripcion}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  ))}
                 </div>
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
-                  <Button onClick={cargar} disabled={pending || elegidos.length === 0 || sinCategoria.length > 0}>
+                  <Button onClick={cargar} disabled={pending || elegidas.length === 0 || sinCategoria.length > 0}>
                     {pending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-                    Cargar {elegidos.length} seleccionado{elegidos.length === 1 ? '' : 's'}
+                    Cargar {elegidas.length} seleccionado{elegidas.length === 1 ? '' : 's'}
                   </Button>
-                  <Button variant="outline" onClick={descartar} disabled={pending || elegidos.length === 0}>
+                  <Button variant="outline" onClick={descartar} disabled={pending || elegidas.length === 0}>
                     Descartar
                   </Button>
                   {sinCategoria.length > 0 && (
@@ -267,7 +320,10 @@ export default function ConciliacionView({ resumen, movimientos, categorias, rec
                       {m.estado === 'a_cargar'
                         ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" aria-label="Cargando" />
                         : <Check className="h-4 w-4 text-emerald-500 shrink-0" aria-label="Cargado" />}
-                      <span className="truncate">{m.descripcion}</span>
+                      <span className="truncate" title={m.descripcion}>
+                        {m.descripcion}
+                        {m.estado === 'aplicada' && <span className="text-muted-foreground"> · restada de su consumo</span>}
+                      </span>
                     </span>
                     <span className="tabular-nums">{monto(m.monto, m.moneda)}</span>
                   </div>

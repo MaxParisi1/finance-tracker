@@ -39,6 +39,7 @@ PERCEPCION = "percepcion"          # DB.RG 5617: se reintegra si el saldo en USD
 REINTEGRO = "reintegro"            # CR.RG 5617 y otros créditos que no son pagos
 PAGO = "pago"                      # pagos del resumen anterior: no son gastos
 CUOTA_REGISTRADA = "cuota_registrada"  # cuota de una compra que se registró por el total
+BONIFICACION = "bonificacion"      # descuento sobre un consumo del mismo resumen (mismo cupón)
 
 _PERCEPCION_RE = re.compile(r"^DB\.?RG\s*5617", re.IGNORECASE)
 _REINTEGRO_RE = re.compile(r"^CR\.?RG\s*5617", re.IGNORECASE)
@@ -48,7 +49,11 @@ _REINTEGRO_RE = re.compile(r"^CR\.?RG\s*5617", re.IGNORECASE)
 class Resultado:
     movimiento: Movimiento
     estado: str
+    # Para una bonificación: el gasto del consumo al que se descuenta (None si
+    # ese consumo todavía no está registrado).
     gasto_id: str | None = None
+    # Para una bonificación: el índice del consumo que la generó.
+    aplica_a: int | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,10 @@ def _clasificar(m: Movimiento) -> str | None:
     if m.seccion == "impuesto":
         return PERCEPCION if _PERCEPCION_RE.match(m.descripcion) else IMPUESTO
     return None
+
+
+def es_bonificacion(m: Movimiento) -> bool:
+    return m.seccion == "consumo" and m.monto < 0 and m.descripcion.upper().startswith("BONIF")
 
 
 def _monto(g: dict) -> Decimal:
@@ -155,10 +164,13 @@ def conciliar(resumen: Resumen, gastos: list[dict], sufijo: str) -> Conciliacion
     """
     estados: dict[int, Resultado] = {}
     pendientes: list[int] = []
+    bonificaciones: list[int] = []
     for i, m in enumerate(resumen.movimientos):
         fijo = _clasificar(m)
         if fijo:
             estados[i] = Resultado(m, fijo)
+        elif es_bonificacion(m):
+            bonificaciones.append(i)
         else:
             pendientes.append(i)
 
@@ -178,6 +190,19 @@ def conciliar(resumen: Resumen, gastos: list[dict], sufijo: str) -> Conciliacion
         elegido = max(libres, key=lambda g: _puntaje(m, g))
         usados.add(elegido["id"])
         estados[i] = Resultado(m, COINCIDE, gasto_id=elegido["id"])
+
+    # Una bonificación lleva el mismo cupón que el consumo que descuenta
+    # ("BONIF. CONSUMO OPENPAY*MILAGRANJAS 001015" contra "OPENPAY*MILAGRANJAS
+    # 001015"). Se resta de ese gasto en vez de cargarse como un gasto negativo.
+    for i in bonificaciones:
+        m = resumen.movimientos[i]
+        origen = next(
+            (j for j in pendientes
+             if m.cupon and resumen.movimientos[j].cupon == m.cupon and resumen.movimientos[j].monto > 0),
+            None,
+        )
+        gasto = estados[origen].gasto_id if origen is not None and estados[origen].estado == COINCIDE else None
+        estados[i] = Resultado(m, BONIFICACION if origen is not None else FALTA, gasto_id=gasto, aplica_a=origen)
 
     # Solo los que son de ESTA tarjeta: un gasto sin tarjeta asignada no se
     # puede atribuir a ningún resumen, y aparecería sobrando en todos.

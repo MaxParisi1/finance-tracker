@@ -1344,6 +1344,8 @@ export interface MovimientoResumen {
   gasto_id: string | null
   categoria_sugerida: string | null
   recurrente_id: string | null
+  /** El gasto con el que coincidió, o al que se descuenta una bonificación. */
+  gasto: { monto_original: number; comercio: string | null; fecha: string } | null
 }
 
 const SELECT_RESUMEN =
@@ -1367,7 +1369,7 @@ export async function getResumenTarjeta(id: string): Promise<{
   const supabase = getSupabaseServer()
   const [r, m] = await Promise.all([
     supabase.from('resumenes_tarjeta').select(SELECT_RESUMEN).eq('id', id).maybeSingle(),
-    supabase.from('resumen_movimientos').select('*').eq('resumen_id', id).order('orden'),
+    supabase.from('resumen_movimientos').select('*, gasto:gastos(monto_original, comercio, fecha)').eq('resumen_id', id).order('orden'),
   ])
   if (r.error) throw new Error(r.error.message)
   if (m.error) throw new Error(m.error.message)

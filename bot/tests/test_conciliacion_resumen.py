@@ -11,17 +11,17 @@ from decimal import Decimal
 import pytest
 
 from bot.tools.conciliacion_resumen import (
-    COINCIDE, CUOTA_REGISTRADA, FALTA, IMPUESTO, PAGO, PERCEPCION, REINTEGRO,
+    BONIFICACION, COINCIDE, CUOTA_REGISTRADA, FALTA, IMPUESTO, PAGO, PERCEPCION, REINTEGRO,
     conciliar, es_candidato,
 )
 from bot.tools.resumen_bbva import Movimiento, Resumen
 
 
-def _mov(fecha, descripcion, monto, moneda="ARS", seccion="consumo", cuota=None):
+def _mov(fecha, descripcion, monto, moneda="ARS", seccion="consumo", cuota=None, cupon=None):
     actual, total = cuota or (None, None)
     return Movimiento(
         seccion=seccion, fecha=date.fromisoformat(fecha), descripcion=descripcion,
-        monto=Decimal(monto), moneda=moneda, cuota_actual=actual, cuotas_total=total,
+        monto=Decimal(monto), moneda=moneda, cuota_actual=actual, cuotas_total=total, cupon=cupon,
     )
 
 
@@ -173,3 +173,41 @@ def test_candidatos_por_tarjeta():
     assert not es_candidato({"tarjeta": None, "medio_pago": "transferencia"}, "1670")
     assert not es_candidato({"tarjeta": "BBVA Visa 9854"}, "1670")
     assert not es_candidato({"tarjeta": "BBVA Visa 16701"}, "1670")
+
+
+@pytest.mark.unit
+def test_la_bonificacion_se_descuenta_del_consumo_con_el_mismo_cupon():
+    """
+    Caso real: "BONIF. CONSUMO OPENPAY*MILAGRANJAS" (-$12.003,73) lleva el
+    cupón 001015, el mismo del consumo de $45.076. No es un gasto aparte: se
+    resta del consumo, que ya estaba registrado.
+    """
+    r = _resumen(
+        _mov("2026-09-29", "OPENPAY*MILAGRANJAS", "45076.00", cupon="001015"),
+        _mov("2026-09-29", "BONIF. CONSUMO OPENPAY*MILAGRANJAS", "-12003.73", cupon="001015"),
+    )
+    gastos = [_gasto("milagranjas", "2026-09-29", 45076.00, "Openpay*Milagranjas")]
+
+    conc = conciliar(r, gastos, "1670")
+
+    assert _estados(conc) == [(COINCIDE, "milagranjas"), (BONIFICACION, "milagranjas")]
+    assert conc.resultados[1].aplica_a == 0
+
+
+@pytest.mark.unit
+def test_la_bonificacion_de_un_consumo_que_falta_espera_a_ese_consumo():
+    r = _resumen(
+        _mov("2026-10-20", "OPENPAY*MILAGRANJAS", "48290.25", cupon="000446"),
+        _mov("2026-10-20", "BONIF. CONSUMO OPENPAY*MILAGRANJAS", "-12000.12", cupon="000446"),
+    )
+
+    conc = conciliar(r, [], "1670")
+
+    assert _estados(conc) == [(FALTA, None), (BONIFICACION, None)]
+    assert conc.resultados[1].aplica_a == 0
+
+
+@pytest.mark.unit
+def test_una_bonificacion_sin_consumo_del_mismo_cupon_queda_para_revisar():
+    r = _resumen(_mov("2026-10-20", "BONIF. CONSUMO ALGO", "-500.00", cupon="999999"))
+    assert _estados(conciliar(r, [], "1670")) == [(FALTA, None)]

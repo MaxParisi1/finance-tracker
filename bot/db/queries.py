@@ -648,3 +648,20 @@ def gasto_por_email(message_id: str) -> dict | None:
 
 def actualizar_movimiento_resumen(movimiento_id: str, campos: dict) -> None:
     get_client().table("resumen_movimientos").update(campos).eq("id", movimiento_id).execute()
+
+
+def movimiento_consumo_por_cupon(resumen_id: str, cupon: str | None) -> dict | None:
+    """El consumo (monto positivo) de un resumen con ese cupón."""
+    if not cupon:
+        return None
+    client = get_client()
+    res = (
+        client.table("resumen_movimientos").select("id, estado, gasto_id")
+        .eq("resumen_id", resumen_id).eq("cupon", cupon).eq("seccion", "consumo").gt("monto", 0)
+        .limit(1).execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def actualizar_gasto(gasto_id: str, campos: dict) -> None:
+    get_client().table("gastos").update(campos).eq("id", gasto_id).execute()

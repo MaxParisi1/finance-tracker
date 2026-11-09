@@ -118,6 +118,7 @@ def test_cargar_un_movimiento_crea_el_gasto_y_lo_vincula_sin_aprender_alias():
     q.obtener_recurrentes_activos.return_value = [{"id": "rec-mapfre", "frecuencia": "mensual"}]
     with patch.object(resumenes, "queries", q), \
          patch.object(resumenes, "guardar_gasto", return_value={"id": "g-nuevo"}) as guardar, \
+         patch.object(resumenes.matcher, "sugerir_recurrente", return_value={"id": "rec-mapfre"}), \
          patch.object(resumenes.matcher, "confirmar_vinculacion") as vincular:
         resumenes.cargar_movimiento(_mov(recurrente_id="rec-mapfre"))
 
@@ -172,3 +173,133 @@ def test_un_error_inesperado_deja_el_resumen_en_error_y_sigue_con_los_demas():
 
     assert procesar.call_count == 2
     assert q.actualizar_resumen.call_args.args[1]["estado"] == "error"
+
+
+@pytest.mark.unit
+def test_un_fijo_elegido_a_mano_se_aprende_como_alias():
+    """
+    Caso real: YouTube pasó a cobrarse como "GOOGLE *YouTubeP P1p8Hdgx USD 3,00"
+    y el bot no lo sugirió. Si el usuario lo vincula a mano, es su confirmación:
+    se guarda el alias para que el mes que viene se vincule solo.
+    """
+    q = _q()
+    q.obtener_recurrentes_activos.return_value = [{"id": "rec-yt", "frecuencia": "mensual"}]
+    with patch.object(resumenes, "queries", q), \
+         patch.object(resumenes, "guardar_gasto", return_value={"id": "g"}), \
+         patch.object(resumenes.matcher, "sugerir_recurrente", return_value=None), \
+         patch.object(resumenes.matcher, "confirmar_vinculacion") as vincular:
+        resumenes.cargar_movimiento(_mov(
+            descripcion="GOOGLE *YouTubeP P1p8Hdgx USD 3,00", monto="3.00", moneda="USD", recurrente_id="rec-yt",
+        ))
+
+    assert vincular.call_args.kwargs["guardar_alias"] is True
+    assert vincular.call_args.kwargs["confirmado_usuario"] is True
+
+
+def _impuesto(id, descripcion, monto, moneda="ARS"):
+    return {
+        "id": id, "resumen_id": "r1", "seccion": "impuesto", "descripcion": descripcion,
+        "monto": monto, "moneda": moneda, "categoria_sugerida": "Impuestos y comisiones",
+        "resumenes_tarjeta": {"id": "r1", "cierre": "2026-10-22", "tarjetas": TARJETA},
+    }
+
+
+@pytest.mark.unit
+def test_los_impuestos_de_un_resumen_van_en_un_solo_gasto():
+    """Sellos, IVA e IIBB sueltos no aportan nada: un gasto por resumen, con el detalle en las notas."""
+    q = _q()
+    filas = [
+        _impuesto("i1", "IMPUESTO DE SELLOS $", "20462.41"),
+        _impuesto("i2", "IVA RG 4240 21%( 4578,00)", "961.38"),
+        _impuesto("i3", "IIBB PERCEP-BSAS 2,00%( 4578,00)", "91.56"),
+    ]
+    with patch.object(resumenes, "queries", q), \
+         patch.object(resumenes, "guardar_gasto", return_value={"id": "g-imp"}) as guardar:
+        resumenes.cargar_impuestos(filas)
+
+    guardar.assert_called_once()
+    kw = guardar.call_args.kwargs
+    assert (kw["monto"], kw["categoria"], kw["fecha"]) == (21515.35, "Impuestos y comisiones", "2026-10-22")
+    assert kw["email_message_id"] == "resumen:r1:impuestos:ARS"
+    assert "IMPUESTO DE SELLOS" in kw["notas"]
+    assert q.actualizar_movimiento_resumen.call_count == 3
+
+
+@pytest.mark.unit
+def test_los_impuestos_cargados_dos_veces_no_duplican():
+    q = _q(gasto_por_email={"id": "g-imp"})
+    with patch.object(resumenes, "queries", q), patch.object(resumenes, "guardar_gasto") as guardar:
+        resumenes.cargar_impuestos([_impuesto("i1", "IMPUESTO DE SELLOS $", "20462.41")])
+
+    guardar.assert_not_called()
+    q.actualizar_movimiento_resumen.assert_called_once_with("i1", {"estado": "cargado", "gasto_id": "g-imp"})
+
+
+def _bonif(**overrides):
+    base = {
+        "id": "b1", "resumen_id": "r1", "seccion": "consumo", "cupon": "001015",
+        "descripcion": "BONIF. CONSUMO OPENPAY*MILAGRANJAS", "monto": "-12003.73", "moneda": "ARS",
+        "gasto_id": "g-milagranjas",
+    }
+    return {**base, **overrides}
+
+
+@pytest.mark.unit
+def test_la_bonificacion_se_resta_del_gasto_del_consumo():
+    """Caso real: Milagranjas $45.076 con bonificación de $12.003,73 → queda lo que realmente se pagó."""
+    q = _q()
+    q.obtener_gasto_por_id.return_value = {
+        "id": "g-milagranjas", "monto_original": 45076.0, "moneda": "ARS", "tipo_cambio": 1.0, "notas": None,
+    }
+    with patch.object(resumenes, "queries", q):
+        resumenes.aplicar_bonificacion(_bonif())
+
+    gasto_id, campos = q.actualizar_gasto.call_args.args
+    assert gasto_id == "g-milagranjas"
+    assert (campos["monto_original"], campos["monto_ars"]) == (33072.27, 33072.27)
+    assert "[bonif:b1]" in campos["notas"]
+    q.actualizar_movimiento_resumen.assert_called_once_with("b1", {"estado": "aplicada", "gasto_id": "g-milagranjas"})
+
+
+@pytest.mark.unit
+def test_la_bonificacion_no_se_descuenta_dos_veces():
+    """Si el bot se cayó después de actualizar el gasto, la marca en las notas evita restarla de nuevo."""
+    q = _q()
+    q.obtener_gasto_por_id.return_value = {
+        "id": "g-milagranjas", "monto_original": 33072.27, "moneda": "ARS", "tipo_cambio": 1.0,
+        "notas": "Bonificación -12003.73 del resumen [bonif:b1]",
+    }
+    with patch.object(resumenes, "queries", q):
+        resumenes.aplicar_bonificacion(_bonif())
+
+    q.actualizar_gasto.assert_not_called()
+    q.actualizar_movimiento_resumen.assert_called_once_with("b1", {"estado": "aplicada", "gasto_id": "g-milagranjas"})
+
+
+@pytest.mark.unit
+def test_la_bonificacion_de_un_consumo_no_cargado_vuelve_a_revisar():
+    q = _q()
+    q.movimiento_consumo_por_cupon.return_value = {"id": "c1", "estado": "falta", "gasto_id": None}
+    with patch.object(resumenes, "queries", q):
+        resumenes.aplicar_bonificacion(_bonif(gasto_id=None))
+
+    q.actualizar_gasto.assert_not_called()
+    q.actualizar_movimiento_resumen.assert_called_once_with("b1", {"estado": "bonificacion"})
+
+
+@pytest.mark.unit
+def test_el_ciclo_carga_el_consumo_antes_que_su_bonificacion():
+    q = _q()
+    q.resumenes_pendientes.return_value = []
+    consumo = _mov(id="c1", seccion="consumo", monto="48290.25")
+    bonif = _bonif(gasto_id=None)
+    imp = _impuesto("i1", "IMPUESTO DE SELLOS $", "61.04")
+    q.movimientos_a_cargar.return_value = [bonif, imp, consumo]
+    orden = []
+    with patch.object(resumenes, "queries", q), \
+         patch.object(resumenes, "cargar_impuestos", side_effect=lambda f: orden.append("impuestos")), \
+         patch.object(resumenes, "cargar_movimiento", side_effect=lambda m: orden.append(m["id"])), \
+         patch.object(resumenes, "aplicar_bonificacion", side_effect=lambda m: orden.append(m["id"])):
+        resumenes.procesar_ciclo()
+
+    assert orden == ["impuestos", "c1", "b1"]

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from bot.db import queries
 from bot.tools import recurrentes_matcher as matcher
 from bot.tools.conciliacion_resumen import (
-    FALTA, IMPUESTO, conciliar, es_candidato, ventana_de_busqueda,
+    _PERCEPCION_RE, FALTA, IMPUESTO, conciliar, es_candidato, ventana_de_busqueda,
 )
 from bot.tools.gastos import guardar_gasto, historial_comercio
 from bot.tools.resumen_bbva import ResumenInvalido, leer_resumen
@@ -32,7 +32,7 @@ from bot.tools.tarjetas import nombre_tarjeta
 logger = logging.getLogger(__name__)
 
 INTERVALO = 10  # segundos: la web espera el resultado mirando la fila
-CATEGORIA_IMPUESTOS = "Otros"
+CATEGORIA_IMPUESTOS = "Impuestos y comisiones"
 _FUENTE = "resumen_tarjeta"
 
 
@@ -181,13 +181,107 @@ def cargar_movimiento(mov: dict) -> None:
     if mov.get("recurrente_id"):
         rec = next((r for r in queries.obtener_recurrentes_activos() if r["id"] == mov["recurrente_id"]), None)
         if rec:
+            # Si el usuario eligió el fijo a mano (no era el sugerido), es una
+            # confirmación suya y se aprende como alias: así el mes que viene se
+            # vincula solo. Caso real: YouTube pasó a cobrarse como
+            # "GOOGLE *YouTubeP P1p8Hdgx" y el fuzzy no llegaba al umbral.
+            # Lo que solo aceptó de la sugerencia no se aprende: un fuzzy
+            # equivocado se repetiría para siempre.
+            sugerido = matcher.sugerir_recurrente({
+                "comercio": mov["descripcion"], "monto_original": float(mov["monto"]),
+                "moneda": moneda, "fecha": mov["fecha"],
+            })
+            elegido_a_mano = not sugerido or sugerido["id"] != rec["id"]
             matcher.confirmar_vinculacion(
-                gasto["id"], rec, comercio=mov["descripcion"], guardar_alias=False,
-                nuevo_monto=float(mov["monto"]), fecha_pago=fecha,
+                gasto["id"], rec, comercio=mov["descripcion"], guardar_alias=elegido_a_mano,
+                confirmado_usuario=elegido_a_mano, nuevo_monto=float(mov["monto"]), fecha_pago=fecha,
             )
 
     queries.actualizar_movimiento_resumen(mov["id"], {"estado": "cargado", "gasto_id": gasto["id"]})
     logger.info("Movimiento %s cargado como gasto %s", mov["id"], gasto["id"])
+
+
+def cargar_impuestos(filas: list[dict]) -> None:
+    """
+    Los impuestos y cargos de un resumen van en UN gasto: sellos, IVA e IIBB
+    por separado son líneas que no aportan nada. La percepción RG 5617 queda
+    afuera (se reintegra) y, si el usuario igual la quiere, va como un
+    movimiento suelto.
+
+    Idempotente por resumen y moneda, igual que `cargar_movimiento`.
+    """
+    resumen = filas[0]["resumenes_tarjeta"]
+    tarjeta = resumen["tarjetas"]
+    for moneda in sorted({f["moneda"] for f in filas}):
+        grupo = [f for f in filas if f["moneda"] == moneda]
+        clave = f"resumen:{resumen['id']}:impuestos:{moneda}"
+        existente = queries.gasto_por_email(clave)
+        if existente:
+            gasto_id = existente["id"]
+        else:
+            total = round(sum(float(f["monto"]) for f in grupo), 2)
+            detalle = "; ".join(f"{f['descripcion']} {f['monto']}" for f in grupo)
+            gasto_id = guardar_gasto(
+                descripcion=f"Impuestos y cargos {nombre_tarjeta(tarjeta)}",
+                monto=total,
+                moneda=moneda,
+                categoria=grupo[0].get("categoria_sugerida") or CATEGORIA_IMPUESTOS,
+                medio_pago="credito_usd" if moneda == "USD" else "credito_ars",
+                fecha=resumen["cierre"],
+                comercio="Impuestos y cargos de la tarjeta",
+                notas=f"Resumen con cierre {resumen['cierre']}: {detalle}",
+                fuente=_FUENTE,
+                tarjeta=nombre_tarjeta(tarjeta),
+                email_message_id=clave,
+            )["id"]
+        for f in grupo:
+            queries.actualizar_movimiento_resumen(f["id"], {"estado": "cargado", "gasto_id": gasto_id})
+        logger.info("Impuestos del resumen %s cargados en el gasto %s", resumen["id"], gasto_id)
+
+
+def aplicar_bonificacion(mov: dict) -> None:
+    """
+    Resta la bonificación del gasto del consumo que la generó (mismo cupón).
+
+    Si ese consumo todavía no está registrado, la bonificación vuelve a quedar
+    para revisar. La marca `[bonif:<id>]` en las notas evita descontarla dos
+    veces si el proceso muere entre actualizar el gasto y marcar el movimiento.
+    """
+    gasto_id = mov.get("gasto_id")
+    if not gasto_id:
+        origen = queries.movimiento_consumo_por_cupon(mov["resumen_id"], mov.get("cupon"))
+        gasto_id = origen.get("gasto_id") if origen and origen.get("estado") in ("cargado", "coincide") else None
+    gasto = queries.obtener_gasto_por_id(gasto_id) if gasto_id else None
+    if gasto is None:
+        queries.actualizar_movimiento_resumen(mov["id"], {"estado": "bonificacion"})
+        logger.info("Bonificación %s sin consumo registrado: vuelve a revisar", mov["id"])
+        return
+
+    marca = f"[bonif:{mov['id']}]"
+    notas = gasto.get("notas") or ""
+    if marca not in notas:
+        if (gasto.get("moneda") or "ARS").upper() != mov["moneda"]:
+            queries.actualizar_movimiento_resumen(mov["id"], {"estado": "bonificacion"})
+            logger.warning("Bonificación %s en otra moneda que su consumo: no se aplica", mov["id"])
+            return
+        nuevo = round(float(gasto["monto_original"]) + float(mov["monto"]), 2)
+        tipo_cambio = float(gasto.get("tipo_cambio") or 1)
+        nota = f"Bonificación {mov['monto']} del resumen {marca}"
+        queries.actualizar_gasto(gasto_id, {
+            "monto_original": nuevo,
+            "monto_ars": round(nuevo * tipo_cambio, 2),
+            "notas": f"{notas}\n{nota}".strip(),
+        })
+    queries.actualizar_movimiento_resumen(mov["id"], {"estado": "aplicada", "gasto_id": gasto_id})
+    logger.info("Bonificación %s aplicada al gasto %s", mov["id"], gasto_id)
+
+
+def _es_impuesto_agrupable(mov: dict) -> bool:
+    return mov["seccion"] == "impuesto" and not _PERCEPCION_RE.match(mov["descripcion"])
+
+
+def _es_bonificacion(mov: dict) -> bool:
+    return mov["seccion"] == "consumo" and float(mov["monto"]) < 0 and mov["descripcion"].upper().startswith("BONIF")
 
 
 def procesar_ciclo() -> None:
@@ -200,12 +294,36 @@ def procesar_ciclo() -> None:
                 "estado": "error", "procesado_at": _ahora(),
                 "error": f"Error inesperado al procesarlo ({type(e).__name__}). Revisá los logs del bot.",
             })
-    for mov in queries.movimientos_a_cargar():
+
+    elegidos = queries.movimientos_a_cargar()
+    impuestos: dict[str, list[dict]] = {}
+    bonificaciones: list[dict] = []
+    for mov in elegidos:
+        if _es_impuesto_agrupable(mov):
+            impuestos.setdefault(mov["resumen_id"], []).append(mov)
+        elif _es_bonificacion(mov):
+            bonificaciones.append(mov)
+
+    # Errores: el movimiento queda 'a_cargar' y se reintenta en el ciclo siguiente.
+    for filas in impuestos.values():
+        try:
+            cargar_impuestos(filas)
+        except Exception:
+            logger.exception("Error cargando los impuestos del resumen %s", filas[0]["resumen_id"])
+    # Los consumos antes que las bonificaciones: una bonificación necesita el
+    # gasto de su consumo, que puede estar cargándose en este mismo ciclo.
+    for mov in elegidos:
+        if _es_impuesto_agrupable(mov) or _es_bonificacion(mov):
+            continue
         try:
             cargar_movimiento(mov)
         except Exception:
-            # Queda 'a_cargar' y se reintenta en el ciclo siguiente.
             logger.exception("Error cargando el movimiento %s", mov["id"])
+    for mov in bonificaciones:
+        try:
+            aplicar_bonificacion(mov)
+        except Exception:
+            logger.exception("Error aplicando la bonificación %s", mov["id"])
 
 
 async def loop_resumenes() -> None:

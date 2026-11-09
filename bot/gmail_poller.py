@@ -222,7 +222,10 @@ async def _intentar_match_recurrente(bot, chat_id: int, gasto: dict) -> None:
             await asyncio.to_thread(
                 matcher.confirmar_vinculacion,
                 gasto["id"], candidato.recurrente, comercio,
-                guardar_alias=(candidato.metodo != "alias"),
+                # Un vínculo automático no aprende alias: el alias se saltea
+                # monto y fecha, así que un fuzzy equivocado se repetiría para
+                # siempre. Solo aprende el botón "recordar siempre".
+                guardar_alias=False,
                 nuevo_monto=gasto.get("monto_original"),
                 fecha_pago=gasto.get("fecha"),
             )

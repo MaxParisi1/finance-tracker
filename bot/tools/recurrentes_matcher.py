@@ -135,11 +135,53 @@ Recurrente esperado:
 # Motor de matching principal
 # ──────────────────────────────────────────────
 
+METODOS_AUTOMATICOS = ('alias', 'fuzzy', 'llm')
+
+
+def _periodo(fecha: str, frecuencia: str | None) -> tuple[str, str]:
+    """Primer y último día del período del recurrente que contiene `fecha`."""
+    d = date.fromisoformat(str(fecha))
+    frecuencia = frecuencia or 'mensual'
+    if frecuencia == 'anual':
+        desde, hasta = date(d.year, 1, 1), date(d.year, 12, 31)
+    elif frecuencia == 'semestral':
+        desde = date(d.year, 1 if d.month <= 6 else 7, 1)
+        hasta = date(d.year, 6, 30) if d.month <= 6 else date(d.year, 12, 31)
+    elif frecuencia == 'semanal':
+        desde = d - timedelta(days=d.weekday())
+        hasta = desde + timedelta(days=6)
+    else:
+        desde = d.replace(day=1)
+        hasta = d.replace(day=calendar.monthrange(d.year, d.month)[1])
+    return desde.isoformat(), hasta.isoformat()
+
+
 def encontrar_candidato_db(gasto: dict) -> CandidatoMatch | None:
     """
     Consulta DB y corre el pipeline de matching.
     Llamar con asyncio.to_thread desde código async.
+
+    Un recurrente se cobra una vez por período. Si ya tiene un gasto vinculado
+    en el período de este, un match automático baja a "preguntar": puede ser un
+    cargo distinto del mismo comercio (una propina de PedidosYa contra Plus) o
+    un cobro duplicado, y eso lo decide el usuario.
     """
+    candidato = _buscar_candidato(gasto)
+    if candidato is None or candidato.metodo not in METODOS_AUTOMATICOS or not gasto.get('fecha'):
+        return candidato
+
+    rec = candidato.recurrente
+    desde, hasta = _periodo(gasto['fecha'], rec.get('frecuencia'))
+    if queries.hay_gasto_vinculado_entre(rec['id'], desde, hasta, excluir_gasto_id=gasto.get('id')):
+        logger.info(
+            "  %r ya tiene un pago vinculado entre %s y %s → se pregunta al usuario",
+            rec.get('descripcion'), desde, hasta,
+        )
+        return CandidatoMatch(recurrente=rec, confianza=candidato.confianza, metodo='usuario_pendiente')
+    return candidato
+
+
+def _buscar_candidato(gasto: dict) -> CandidatoMatch | None:
     recurrentes = queries.obtener_recurrentes_activos()
     if not recurrentes:
         logger.info("Match recurrente: no hay recurrentes activos")

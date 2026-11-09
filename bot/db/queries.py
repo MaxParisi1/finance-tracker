@@ -214,10 +214,37 @@ def actualizar_monto_recurrente(recurrente_id: str, nuevo_monto: float) -> None:
     logger.info("Recurrente %s → monto_original=%s", recurrente_id, nuevo_monto)
 
 
-def obtener_aliases_recurrentes() -> dict[str, str]:
-    """Retorna dict {comercio_normalizado: recurrente_id}."""
+def hay_gasto_vinculado_entre(
+    recurrente_id: str, desde: str, hasta: str, excluir_gasto_id: str | None = None
+) -> bool:
+    """True si el recurrente ya tiene un gasto vigente vinculado con fecha en [desde, hasta]."""
     client = get_client()
-    res = client.table("recurrentes_aliases").select("comercio_normalizado, recurrente_id").execute()
+    q = (
+        client.table("gastos")
+        .select("id")
+        .eq("recurrente_id", recurrente_id)
+        .is_("deleted_at", "null")
+        .gte("fecha", desde)
+        .lte("fecha", hasta)
+    )
+    if excluir_gasto_id:
+        q = q.neq("id", excluir_gasto_id)
+    return bool(q.limit(1).execute().data)
+
+
+def obtener_aliases_recurrentes() -> dict[str, str]:
+    """
+    Retorna dict {comercio_normalizado: recurrente_id}, solo de los alias que
+    confirmó el usuario. Un alias se saltea monto y fecha: uno que aprendió solo
+    el matcher (antes se guardaban así) no merece esa confianza.
+    """
+    client = get_client()
+    res = (
+        client.table("recurrentes_aliases")
+        .select("comercio_normalizado, recurrente_id")
+        .eq("confirmado_por_usuario", True)
+        .execute()
+    )
     return {r["comercio_normalizado"]: r["recurrente_id"] for r in res.data}
 
 

@@ -284,7 +284,9 @@ def _es_bonificacion(mov: dict) -> bool:
     return mov["seccion"] == "consumo" and float(mov["monto"]) < 0 and mov["descripcion"].upper().startswith("BONIF")
 
 
-def procesar_ciclo() -> None:
+def procesar_ciclo() -> bool:
+    """Devuelve True si quedó algún movimiento 'a_cargar' por un error: hay que reintentar pronto."""
+    fallo = False
     for fila in queries.resumenes_pendientes():
         try:
             procesar_resumen(fila)
@@ -310,6 +312,7 @@ def procesar_ciclo() -> None:
             cargar_impuestos(filas)
         except Exception:
             logger.exception("Error cargando los impuestos del resumen %s", filas[0]["resumen_id"])
+            fallo = True
     # Los consumos antes que las bonificaciones: una bonificación necesita el
     # gasto de su consumo, que puede estar cargándose en este mismo ciclo.
     for mov in elegidos:
@@ -319,11 +322,14 @@ def procesar_ciclo() -> None:
             cargar_movimiento(mov)
         except Exception:
             logger.exception("Error cargando el movimiento %s", mov["id"])
+            fallo = True
     for mov in bonificaciones:
         try:
             aplicar_bonificacion(mov)
         except Exception:
             logger.exception("Error aplicando la bonificación %s", mov["id"])
+            fallo = True
+    return fallo
 
 
 async def loop_resumenes() -> None:

@@ -16,3 +16,5 @@ google-auth-oauthlib>=1.2.0
 requests>=2.32.0
 # tipo_cambio.py lo usa directo; venía de arrastre con openai y supabase.
 httpx>=0.27.0
+# Escucha los avisos de la base (LISTEN/NOTIFY) para los resúmenes de tarjeta.
+psycopg[binary]>=3.2,<4
